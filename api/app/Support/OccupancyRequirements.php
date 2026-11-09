@@ -2,8 +2,10 @@
 
 namespace App\Support;
 
+use App\Enums\PermitStatus;
 use App\Models\Application;
 use App\Models\DocumentType;
+use App\Models\Permit;
 
 /**
  * The City Engineering Department's "CHECKLIST OF REQUIREMENTS FOR THE
@@ -83,13 +85,27 @@ final class OccupancyRequirements
             'when' => 'always',
             'note' => 'Electrical, mechanical, electronics, sanitary and plumbing, as issued.',
             'carried_from' => null,
+            'blocking' => true,
         ],
+        /*
+         * ── Five required, the rest optional (client, 10 November 2026) ──
+         *
+         * The sheet asked for ten uploads before it could be handed in: every
+         * row not worded "(if …)" blocked by the default in
+         * `ChecklistSupport::build`. The client cut it to five — the
+         * Certificate of Completion, the Building Permit with its ancillary
+         * permits, the approved plans, the FSEC with its Fire Safety
+         * Checklist, and the owner's ID. Every other row now says
+         * `'blocking' => false` here rather than relying on the default, so
+         * the five are readable off this list without knowing the rule.
+         */
         [
             'key' => 'RECEIPTS',
             'label' => 'Official receipts for the building and ancillary permits',
             'when' => 'always',
             'note' => 'Including the environmental clearance, contractor’s tax and BFP receipts.',
             'carried_from' => null,
+            'blocking' => false,
         ],
         [
             'key' => 'PLANS',
@@ -97,6 +113,7 @@ final class OccupancyRequirements
             'when' => 'always',
             'note' => 'As approved by the Building Official.',
             'carried_from' => null,
+            'blocking' => true,
         ],
         [
             'key' => 'AS_BUILT',
@@ -127,6 +144,10 @@ final class OccupancyRequirements
          * application" — does not ask for them at all. Refusing a filing
          * over a document only one of the two papers names would be our
          * rule rather than the city's; asking for it is not.
+         *
+         * This comment said so from 1 October 2026 while neither row carried
+         * `'blocking' => false`, so the default in `ChecklistSupport::build`
+         * blocked both all along. Said explicitly since 10 November 2026.
          */
         [
             'key' => 'CONSTRUCTION_LOGBOOK',
@@ -134,6 +155,7 @@ final class OccupancyRequirements
             'when' => 'always',
             'note' => 'Signed and sealed by the architect or civil engineer who undertook full-time inspection and supervision.',
             'carried_from' => null,
+            'blocking' => false,
         ],
         [
             'key' => 'SITE_PHOTOS',
@@ -141,6 +163,7 @@ final class OccupancyRequirements
             'when' => 'always',
             'note' => 'Photographs of the project as it stands, showing the work substantially complete.',
             'carried_from' => null,
+            'blocking' => false,
         ],
         [
             'key' => 'RELOCATION_SURVEY',
@@ -148,13 +171,22 @@ final class OccupancyRequirements
             'when' => 'always',
             'note' => 'The survey actually conducted on the site.',
             'carried_from' => null,
+            'blocking' => false,
         ],
         [
             'key' => 'PROFESSIONAL_IDS',
-            'label' => 'PRC Identification Card and Professional Tax Receipt of each professional',
+            /*
+             * "In case of change of professional" is the checklist's own
+             * condition on this row (see the printable list), and it was
+             * missing from the label, so the row blocked every filing. Worded
+             * the paper's way since 10 November 2026, like
+             * CHANGE_OF_PROFESSIONAL below.
+             */
+            'label' => 'PRC Identification Card and Professional Tax Receipt of each professional (if the professional in charge changed)',
             'when' => 'always',
-            'note' => 'Signed with three specimen signatures and sealed by each professional.',
+            'note' => 'Only where the professional in charge changed. Signed with three specimen signatures and sealed by each professional.',
             'carried_from' => null,
+            'blocking' => false,
         ],
         [
             'key' => 'CHANGE_OF_PROFESSIONAL',
@@ -195,6 +227,7 @@ final class OccupancyRequirements
             'when' => 'always',
             'note' => 'The Fire Safety Evaluation Clearance and its checklist, from BFP.',
             'carried_from' => null,
+            'blocking' => true,
         ],
         [
             'key' => 'OWNER_ID',
@@ -228,7 +261,7 @@ final class OccupancyRequirements
         );
         $representative = trim((string) ($answers['authorized_representative'] ?? ''));
 
-        return ChecklistSupport::build(
+        $rows = ChecklistSupport::build(
             $application,
             'OCCUPANCY',
             self::CODE_PREFIX,
@@ -237,6 +270,64 @@ final class OccupancyRequirements
                 ? $representative !== ''
                 : true,
         );
+
+        /*
+         * ── The Zoning Clearance fills itself in (client, 10 November 2026) ──
+         *
+         * Once CPDO has issued the clearance — on this filing, or a live one
+         * the business already holds — the row is answered by that
+         * certificate, the way CENRO's FOR RENEWAL row is answered by a CEC
+         * the register issued (`CecRequirements`). The owner is not asked to
+         * upload a copy of a paper the City printed. `code` goes null so the
+         * screen offers no dropzone, and `reference` prints the number.
+         * Until it is issued the row stays an optional upload, as before.
+         */
+        $zoning = self::issuedZoningClearance($application);
+        if ($zoning !== null) {
+            foreach ($rows as $i => $row) {
+                if ($row['key'] === 'ZONING_CLEARANCE') {
+                    $rows[$i] = [
+                        ...$row,
+                        'code' => null,
+                        'source' => 'carried',
+                        'satisfied' => true,
+                        'note' => 'Filled in from the Zoning Clearance the City issued. Nothing to upload.',
+                        'reference' => $zoning->permit_number,
+                    ];
+                }
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
+     * The Zoning Clearance that answers the ZONING_CLEARANCE row, if any.
+     *
+     * This filing's own first, whatever its status (OBO reads the one issued
+     * alongside its sheet); otherwise a live one the business holds from an
+     * earlier filing.
+     */
+    public static function issuedZoningClearance(Application $application): ?Permit
+    {
+        $zoning = fn () => Permit::whereHas('permitType', fn ($q) => $q->where('code', 'ZONING'));
+
+        if ($application->id !== null) {
+            $own = $zoning()->where('application_id', $application->id)->latest('issued_at')->first();
+            if ($own !== null) {
+                return $own;
+            }
+        }
+
+        if ($application->business_id === null) {
+            return null;
+        }
+
+        return $zoning()
+            ->where('business_id', $application->business_id)
+            ->where('status', PermitStatus::Active->value)
+            ->latest('issued_at')
+            ->first();
     }
 
     public static function accepts(string $code): bool

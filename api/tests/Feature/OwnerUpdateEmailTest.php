@@ -9,6 +9,7 @@ use App\Models\Application;
 use App\Models\AppNotification;
 use App\Models\Department;
 use App\Models\Inspection;
+use App\Models\OfficerRequest;
 use App\Models\User;
 use App\Services\NotificationService;
 use App\Services\WorkflowService;
@@ -122,6 +123,25 @@ it('keeps red out of an ordinary update', function () {
 
         return ! $mail->isDisapproval;
     });
+});
+
+/*
+ * The e-mail carries the notice's own link, so the message and requirement
+ * notices open the conversation and the request from the inbox too (client,
+ * 10 November 2026), not the Application Status page.
+ */
+it('e-mails an owner’s message and requirement notices with the in-app link', function () {
+    Queue::fake();
+    $app = emailableApplication();
+    $owner = $app->applicant;
+    $requirement = (new OfficerRequest)->forceFill(['title' => 'Lease contract'])->setRelation('application', $app);
+    $requirement->id = 4321;
+
+    app(NotificationService::class)->newMessage($app, $owner);
+    app(NotificationService::class)->requestCreated($requirement, $owner);
+
+    Queue::assertPushed(SendOwnerUpdateEmail::class, fn (SendOwnerUpdateEmail $job) => $job->link === "/messages?application={$app->id}");
+    Queue::assertPushed(SendOwnerUpdateEmail::class, fn (SendOwnerUpdateEmail $job) => $job->link === '/requests?request=4321');
 });
 
 it('does not e-mail staff, and does not e-mail the owner about a staff notice', function () {

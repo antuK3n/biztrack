@@ -6,8 +6,8 @@ import { makeBilledApplication } from './payments'
  * The owner's proof of a payment made at the counter (thesis panel revisions,
  * matrix item 4): after choosing Over the Counter and paying at City Hall, the
  * owner sends the OR number and the date paid, a photo of the receipt, or
- * both. Sending marks nothing paid; sending again replaces the proof BPLO has
- * not confirmed yet.
+ * both. Sending marks nothing paid, and one receipt waits for BPLO at a time
+ * (client, 10 November 2026): once sent, the form is gone until BPLO rejects it.
  */
 test.describe.configure({ timeout: 180_000 })
 test.use({ storageState: mergedStorageState(['owner.json', 'bplo.json']) })
@@ -50,7 +50,7 @@ test('the owner sends the OR and a photo of the receipt, and the bill stays with
   await page.getByLabel('Photo of the receipt').setInputFiles(RECEIPT)
   await page.getByRole('button', { name: 'Send proof of payment' }).click()
 
-  await expect(page.getByText('Proof sent. BPLO will confirm your payment.')).toBeVisible()
+  await expect(page.getByText('Receipt sent — waiting for BPLO')).toBeVisible()
   const sent = page.locator('dl').filter({ hasText: 'OR number' })
   await expect(sent).toContainText('7654321')
   await expect(sent).toContainText('receipt.pdf')
@@ -60,17 +60,15 @@ test('the owner sends the OR and a photo of the receipt, and the bill stays with
   // Proof is not payment.
   expect(await statusOf(page, appId)).toBe('pending_payment')
 
-  // Sent again before BPLO confirms: the newest replaces the pending one.
-  await page.getByLabel('OR number').fill('7654322')
-  await page.getByLabel('Date paid').fill(yesterday())
-  await page.getByRole('button', { name: 'Send proof of payment' }).click()
-  await expect(sent).toContainText('7654322')
-  await expect(sent).not.toContainText('7654321')
+  // One receipt waits for BPLO at a time: no form to send another.
+  await expect(page.getByRole('button', { name: 'Send proof of payment' })).toHaveCount(0)
+  await expect(page.getByLabel('OR number')).toHaveCount(0)
 
-  // Coming back to the page shows what is waiting on BPLO.
+  // Coming back to the page shows what is waiting on BPLO, still without the form.
   await page.reload()
-  await page.getByRole('button', { name: 'Over the Counter' }).click()
-  await expect(page.getByText('Proof sent. BPLO will confirm your payment.')).toBeVisible()
-  await expect(page.locator('dl').filter({ hasText: 'OR number' })).toContainText('7654322')
+  await expect(page.getByRole('button', { name: 'Over the Counter' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByText('Receipt sent — waiting for BPLO')).toBeVisible()
+  await expect(page.locator('dl').filter({ hasText: 'OR number' })).toContainText('7654321')
+  await expect(page.getByRole('button', { name: 'Send proof of payment' })).toHaveCount(0)
   expect(await statusOf(page, appId)).toBe('pending_payment')
 })

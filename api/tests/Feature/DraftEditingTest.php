@@ -114,6 +114,14 @@ it('rejects a fee profile that is not made of sane numbers', function () {
         ->assertStatus(422)
         ->assertJsonValidationErrors('fee_profile.floor_area_sqm');
 
+    // No. of Storeys (10 November 2026): a whole 1 to 200. Zero was allowed.
+    foreach ([0, 201, 2.5, 'two'] as $storeys) {
+        $put(['storeys' => $storeys])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('fee_profile.storeys');
+    }
+    $put(['storeys' => 3])->assertOk();
+
     // A trillion pesos of gross sales is a typo, not a declaration.
     $put(['lines' => [['category' => 'retailer', 'gross_sales' => 1_000_000_000_000]]])
         ->assertStatus(422)

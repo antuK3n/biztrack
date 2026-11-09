@@ -4,7 +4,10 @@ namespace App\Console\Commands;
 
 use App\Enums\ApplicationStatus;
 use App\Enums\ApplicationType;
+use App\Enums\ClearanceStatus;
 use App\Enums\PermitStatus;
+use App\Models\Application;
+use App\Models\AuditLog;
 use App\Models\Permit;
 use App\Models\PermitExpiryNotice;
 use App\Models\PermitType;
@@ -30,6 +33,8 @@ use Illuminate\Support\Facades\DB;
  *      Active again, so a later suspension starts its own count.
  *   5. The Occupancy Permit's yearly inspection, opened for OBO on the day
  *      it falls due (App\Support\AnnualInspection).
+ *   6. One reminder to hand in an amendment's clearance sheet, three days
+ *      after the amendment is submitted (client, 10 November 2026).
  *
  * The Occupancy Permit sits out 1–3. It never expires and is never renewed
  * (client, 20 October 2026: *"only annual inspection instead of annual
@@ -102,6 +107,15 @@ class ScanPermits extends Command
 
     /** Days between suspension reminders, and before the first. */
     private const SUSPENSION_REMINDER_DAYS = 7;
+
+    /**
+     * Days after an amendment is submitted before the owner is reminded to
+     * hand in its clearance sheet. Our choice (client, 10 November 2026, asked
+     * for "N days" without a figure): long enough not to chase someone filling
+     * it in that week, short enough that BPLO's three-day tier is not spent
+     * waiting on a sheet nobody knew was outstanding.
+     */
+    private const HAND_IN_REMINDER_DAYS = 3;
 
     public function handle(NotificationService $notify): int
     {
@@ -230,9 +244,62 @@ class ScanPermits extends Command
         // --- 5. Occupancy Permits due their yearly inspection ---------------
         $annual = AnnualInspection::openDue($today->toImmutable());
 
-        $this->info("Scan complete: {$reminders} expiry reminder(s), {$expired} auto-expired, {$renewalNudges} renewal nudge(s), {$suspensionReminders} suspension reminder(s), {$annual} annual inspection(s) opened.");
+        // --- 6. An amendment's clearance sheet not handed in ----------------
+        $handIns = $this->remindClearancesNotHandedIn($notify, $today);
+
+        $this->info("Scan complete: {$reminders} expiry reminder(s), {$expired} auto-expired, {$renewalNudges} renewal nudge(s), {$suspensionReminders} suspension reminder(s), {$annual} annual inspection(s) opened, {$handIns} hand-in reminder(s).");
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Remind the owner, once, to hand in an amendment's clearance sheet.
+     *
+     * Client, 10 November 2026. A move (or a new trade, or a larger floor
+     * area) carries a Zoning Clearance that `WorkflowService::submit` applies
+     * for and stops: the sheet is the owner's to hand in, and until they do
+     * CPDO has nothing to read and BPLO's Approve waits. Nothing chased it.
+     *
+     * Once per filing, never repeated: the audit row
+     * `amendment.clearance_reminded` is the ledger (permit_expiry_notices is
+     * keyed on a permit, and an amendment has none yet). Written before the
+     * send, as `markOnce` is, and only for a filing that has an owner to tell.
+     * Counted from the amendment's own submission, in whole days.
+     */
+    private function remindClearancesNotHandedIn(NotificationService $notify, Carbon $today): int
+    {
+        $cutoff = $today->copy()->subDays(self::HAND_IN_REMINDER_DAYS)->endOfDay();
+
+        $filings = Application::query()
+            ->where('application_type', ApplicationType::Amendment->value)
+            ->whereIn('status', [ApplicationStatus::ForApproval->value, ApplicationStatus::Returned->value])
+            ->whereNotNull('submitted_at')
+            ->where('submitted_at', '<=', $cutoff)
+            ->whereNotNull('applicant_user_id')
+            ->whereHas('permitTypes', fn ($q) => $q
+                ->whereIn('permit_types.code', PermitType::REQUIRED_CLEARANCE_CODES)
+                ->where('application_permit_types.status', ClearanceStatus::NotStarted->value))
+            ->with(['applicant', 'permitTypes'])
+            ->get();
+
+        $sent = 0;
+        foreach ($filings as $app) {
+            if ($app->applicant === null || AuditLog::where('action', 'amendment.clearance_reminded')
+                ->where('auditable_type', Application::class)
+                ->where('auditable_id', $app->id)
+                ->exists()) {
+                continue;
+            }
+
+            $type = $app->permitTypes->first(fn (PermitType $pt) => $pt->isRequiredClearance()
+                && $pt->pivot->status === ClearanceStatus::NotStarted);
+
+            Audit::log('amendment.clearance_reminded', $app, ['permit' => $type->code]);
+            $notify->clearanceNotHandedIn($app, $type);
+            $sent++;
+        }
+
+        return $sent;
     }
 
     /**

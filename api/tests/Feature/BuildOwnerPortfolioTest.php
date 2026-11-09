@@ -103,6 +103,8 @@ it('builds the nine businesses, each in the state the spec names', function () {
     foreach (['occ_project', 'occ_building_permit_no', 'occ_building_permit_date', 'occ_submitted_by', 'occ_professional', 'occ_documents'] as $key) {
         expect($cert[$key] ?? null)->not->toBeEmpty("{$key} is blank on {$op->permit_number}");
     }
+    // Ticked from the sheet's uploads, not typed (client, 10 November 2026).
+    expect($cert['occ_documents'])->toContain('Certificate of Completion');
 
     /*
      * Every counter payment was marked by the officer holding the filing at

@@ -1,8 +1,10 @@
 <?php
 
+use App\Enums\OfficerRequestStatus;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
 use App\Models\AppNotification;
+use App\Models\OfficerRequest;
 use App\Models\User;
 use App\Services\NotificationService;
 
@@ -23,7 +25,10 @@ function routerPaths(): array
 
 function linkIsRoutable(string $link, array $paths): bool
 {
-    $segments = explode('/', trim($link, '/'));
+    // The query is the page's business, not the router's: `/requests?request=7`
+    // is the `/requests` route (client, 10 November 2026, when owner message
+    // and requirement notices began naming the thing they are about).
+    $segments = explode('/', trim(strtok($link, '?'), '/'));
 
     foreach ($paths as $path) {
         $pattern = explode('/', trim($path, '/'));
@@ -102,13 +107,62 @@ it('addresses a filing on the site the reader is signed into', function () {
         ->firstOrFail();
     $app = $review->application;
 
+    /*
+     * The owner's is the conversation itself since 10 November 2026 (client):
+     * the Application Status page it used to open does not show messages. Still
+     * on the citizen site, which is what this test is about.
+     */
     expect(linkFor($officer, $app))->toBe("/staff/queue/{$review->id}")
-        ->and(linkFor($owner, $app))->toBe("/applications/{$app->id}");
+        ->and(linkFor($owner, $app))->toBe("/messages?application={$app->id}");
 
     // And both are addresses the router serves, not just correctly prefixed.
     $paths = routerPaths();
     expect(linkIsRoutable("/staff/queue/{$review->id}", $paths))->toBeTrue()
-        ->and(linkIsRoutable("/applications/{$app->id}", $paths))->toBeTrue();
+        ->and(linkIsRoutable("/messages?application={$app->id}", $paths))->toBeTrue();
+});
+
+/*
+ * ── Where the thing announced actually is (client, 10 November 2026) ────────
+ *
+ * An owner's message and requirement notices opened the filing's Application
+ * Status page, which shows neither. They now open the conversation and the
+ * request in Other Requirements. Status, inspection, note and rejection
+ * notices keep the Application Status page, where their news is.
+ */
+it('opens an owner’s requirement notices on the request in Other Requirements', function () {
+    $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
+    $officer = User::where('email', 'bplo@biztrack.local')->firstOrFail();
+    $app = Application::where('applicant_user_id', $owner->id)->firstOrFail();
+    $requirement = OfficerRequest::create([
+        'application_id' => $app->id,
+        'requested_by_user_id' => $officer->id,
+        'department_id' => $officer->department_id,
+        'title' => 'Barangay clearance',
+        'request_type' => 'document',
+        'status' => 'pending',
+    ]);
+    $notify = app(NotificationService::class);
+    $latest = fn (string $title) => AppNotification::where('user_id', $owner->id)
+        ->where('title', $title)->latest('id')->value('link');
+
+    $notify->requestCreated($requirement->load('application'), $owner);
+    $requirement->update(['status' => OfficerRequestStatus::Fulfilled]);
+    $notify->requestClosed($requirement->fresh()->load('application'), $owner);
+
+    $closedTitle = 'Requirement '.OfficerRequestStatus::Fulfilled->label();
+    expect($latest('Additional requirement requested'))->toBe("/requests?request={$requirement->id}")
+        ->and($latest($closedTitle))->toBe("/requests?request={$requirement->id}")
+        ->and(linkIsRoutable("/requests?request={$requirement->id}", routerPaths()))->toBeTrue();
+});
+
+it('keeps an owner’s office note on the Application Status page', function () {
+    $owner = User::where('email', 'owner@biztrack.local')->firstOrFail();
+    $app = Application::where('applicant_user_id', $owner->id)->firstOrFail();
+
+    app(NotificationService::class)->applicationNote($app, 'The site visit is booked.');
+
+    expect(AppNotification::where('user_id', $owner->id)->latest('id')->value('link'))
+        ->toBe("/applications/{$app->id}");
 });
 
 it('sends a fee adjustment to the pay screen that exists', function () {

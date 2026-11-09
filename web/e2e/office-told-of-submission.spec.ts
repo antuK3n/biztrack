@@ -73,6 +73,7 @@ test('BPLO’s bell announces a new application and opens its review', async ({ 
       fee_profile: {
         business_structure: 'sole_proprietorship',
         floor_area_sqm: 120,
+        storeys: 2,
         employees: 12,
         employees_in_lgu: 6,
         male_employees: 7,

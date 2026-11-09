@@ -50,11 +50,15 @@ use App\Models\PsicCode;
  * new owner whether or not they have an account. No column was added: the
  * parts already had one each.
  *
- * The four parts are replaced TOGETHER (`flush`): a part the new owner left
- * blank is cleared, not kept, or the previous owner's middle name would ride
- * along onto somebody else's. Gender (item 14) is cleared with them — the
- * amendment does not ask for it, and the previous owner's is not the new
- * one's; the next renewal asks for it again.
+ * The four parts used to be replaced TOGETHER, a part not given cleared and
+ * gender (item 14) with it. Client, 10 November 2026: changing only the
+ * owner's first name ended at Submit with "The Surname field is required.",
+ * and had it got through, approval would have wiped the middle name, suffix
+ * and gender. Now the wizard fills the other parts from the record as soon as
+ * one is typed, Surname and Given Name are still required at submission
+ * (`ownershipNameRefusal`, on what was REQUESTED, not merged with the
+ * record), and `flush` writes only the parts given: one left out keeps what
+ * the register holds, and gender is kept.
  *
  * Moving the ACCOUNT is still a person's job, because only BPLO can say which
  * account is the new owner's: `BusinessStatusController::transferOwner`,
@@ -431,7 +435,8 @@ class AmendableFields
                 'writes' => 'owner',
                 'column' => 'middle_name',
                 'cast' => $text,
-                'validation' => ['required', 'string', 'max:255'],
+                // Null is an explicit "none" — see CLEARABLE_OWNER_FIELDS.
+                'validation' => ['nullable', 'string', 'max:255'],
             ],
             'owner_suffix' => [
                 'group' => 'ownership',
@@ -441,7 +446,7 @@ class AmendableFields
                 'writes' => 'owner',
                 'column' => 'suffix',
                 'cast' => $text,
-                'validation' => ['required', 'string', 'max:50'],
+                'validation' => ['nullable', 'string', 'max:50'],
             ],
             // "AMENDMENT OF OWNERSHIP DETAILS".
             'ownership_details' => [
@@ -535,6 +540,20 @@ class AmendableFields
         };
     }
 
+    /**
+     * As `describe`, for a REQUESTED value: a "none" row on a middle name or
+     * suffix reads NONE_LABEL rather than blank (client, 10 November 2026).
+     * Not used for current values, where null is "not recorded".
+     */
+    public static function describeNew(string $field, ?string $value): ?string
+    {
+        if ($value === null && in_array($field, self::CLEARABLE_OWNER_FIELDS, true)) {
+            return self::NONE_LABEL;
+        }
+
+        return self::describe($field, $value);
+    }
+
     public static function allows(string $field): bool
     {
         return array_key_exists($field, self::kinds());
@@ -576,24 +595,47 @@ class AmendableFields
     ];
 
     /**
+     * The owner-name parts a request may set to "none".
+     *
+     * Client, 10 November 2026 ("Cleared = none"): the wizard fills Middle
+     * Name and Suffix from the record, and an applicant who clears one is
+     * saying the new owner has none — not "leave the seller's". The wizard
+     * sends that as a row whose new value is NULL, approval writes it as
+     * empty (`flush`), and the screens print it as NONE_LABEL. Surname and
+     * Given Name can never be "none" (`ownershipNameRefusal`).
+     */
+    public const CLEARABLE_OWNER_FIELDS = ['owner_middle_name', 'owner_suffix'];
+
+    public const NONE_LABEL = '(none)';
+
+    /**
      * Why a change of ownership cannot be submitted yet, or null.
      *
      * Surname and Given Name, both, whenever any part of the new owner is
-     * given: the parts replace the named owner together (see `flush`), so a
-     * surname alone would leave a business owned by somebody with no first
-     * name. The sentence is Laravel's own required message, with the form's
+     * given. The sentence is Laravel's own required message, with the form's
      * labels, rather than a new one.
      *
-     * @param  array<string, ?string>  $requested  field => new value
+     * Asked of what was REQUESTED, deliberately not merged with the register
+     * first (client, 10 November 2026). `flush` keeps a part left out, so a
+     * merge would pass the same filings on approval — but it would also pass
+     * a request whose surname is blank whenever the record has one, and the
+     * filing BPLO reads, the account notice (`requestedOwnerName`) and the
+     * printed form would name the new owner as a bare "Maria". The wizard
+     * fills the other parts from the record, so asking for both costs the
+     * applicant nothing.
+     *
+     * A "none" row (null, CLEARABLE_OWNER_FIELDS) counts as touching the
+     * owner too, so clearing a middle name alone still needs the pair.
+     *
+     * @param  array<string, ?string>  $requested  field => new value, every row
      */
     public static function ownershipNameRefusal(array $requested): ?string
     {
-        $given = array_filter(
-            array_intersect_key($requested, array_flip(self::OWNER_FIELDS)),
-            fn (?string $v) => $v !== null && trim($v) !== '',
-        );
+        $owner = array_intersect_key($requested, array_flip(self::OWNER_FIELDS));
+        $given = array_filter($owner, fn (?string $v) => $v !== null && trim($v) !== '');
+        $cleared = array_intersect_key($owner, array_flip(self::CLEARABLE_OWNER_FIELDS));
 
-        if ($given === []) {
+        if ($given === [] && $cleared === []) {
             return null;
         }
 
@@ -824,21 +866,23 @@ class AmendableFields
 
         if (isset($staged['owner'])) {
             /*
-             * A new PERSON, so every part is replaced and a part not given is
-             * cleared — see the class note. Gender goes with them for the
-             * same reason. Created when the business has no named owner yet,
-             * unlike the address above: here the amendment IS the answer to
-             * "who is named", not a patch on a row that should already exist.
+             * The parts given are written; a part NOT given keeps what the
+             * register holds, and so does gender, which the amendment never
+             * asks — see the class note (client, 10 November 2026). A part
+             * given as "none" (null, CLEARABLE_OWNER_FIELDS) is given, and
+             * is written empty: the new owner has no middle name. Created
+             * when the business has no named owner yet, unlike the address
+             * above: here the amendment IS the answer to "who is named", not
+             * a patch on a row that should already exist.
              */
+            $columns = array_intersect_key(
+                $staged['owner'],
+                array_flip(['surname', 'given_name', 'middle_name', 'suffix']),
+            );
+
             BusinessOwner::updateOrCreate(
                 ['business_id' => $business->id, 'is_primary' => true],
-                [
-                    'surname' => $staged['owner']['surname'] ?? null,
-                    'given_name' => $staged['owner']['given_name'] ?? null,
-                    'middle_name' => $staged['owner']['middle_name'] ?? null,
-                    'suffix' => $staged['owner']['suffix'] ?? null,
-                    'gender' => null,
-                ],
+                $columns,
             );
         }
 

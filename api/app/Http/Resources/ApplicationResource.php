@@ -8,6 +8,7 @@ use App\Models\ApplicationCorrection;
 use App\Models\ApplicationStatusHistory;
 use App\Models\PermitType;
 use App\Models\UnbilledPermitFee;
+use App\Services\WorkflowService;
 use App\Support\AmendableFields;
 use App\Support\ApplicationVisibility;
 use App\Support\ClearanceStanding;
@@ -605,11 +606,19 @@ class ApplicationResource extends JsonResource
                              * screens cannot name the same code differently.
                              */
                             'current_label' => AmendableFields::describe($row->field, $current),
-                            'new_label' => AmendableFields::describe($row->field, $row->new_value),
+                            'new_label' => AmendableFields::describeNew($row->field, $row->new_value),
                             'old_label' => AmendableFields::describe($row->field, $row->old_value),
                         ];
                     })->values()
                     : null,
+            /*
+             * What BPLO's Approve on an amendment is still waiting for — a
+             * move's Zoning Clearance, and whether the owner has handed it in
+             * (client, 10 November 2026). Null when not an amendment.
+             */
+            'amendment_waiting_for' => $this->relationLoaded('permitTypes')
+                ? WorkflowService::amendmentWaitingFor($this->resource)
+                : null,
             'clearance_standing' => $this->relationLoaded('permitTypes')
                 && $request->user()
                 && ApplicationVisibility::readsEveryOffice($request->user())

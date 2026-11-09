@@ -209,7 +209,7 @@ const SHARED_SCREENS = ['/dashboard', '/messages', '/notifications', '/profile',
  * that lands on a login form costs the reader their place and their trust in
  * the rest of the list.
  */
-function notificationHref(link: string, portal: Portal): string {
+function notificationHref(link: string, portal: Portal, type: string): string {
   // Only our own absolute paths. `//host` is a path to React Router and an
   // origin to the browser, and nothing here should ever leave the app.
   if (!link.startsWith('/') || link.startsWith('//')) return homePathFor(portal)
@@ -220,6 +220,26 @@ function notificationHref(link: string, portal: Portal): string {
       path = current + path.slice(retired.length)
       break
     }
+  }
+
+  /*
+   * An owner's message and requirement notices, written before 10 November
+   * 2026, when they pointed at the filing's Application Status page — which
+   * shows neither the message nor the requirement. NotificationService now
+   * writes `/messages?application={id}` and `/requests?request={id}` (client,
+   * 10 November 2026); rows already stored are re-pointed here, for the reason
+   * the note above gives for not rewriting them in a migration.
+   *
+   * By the row's TYPE, not by the path alone: `/applications/{id}` is also, and
+   * still, the right address for a status, inspection, office-note or
+   * rejection notice. Owner's site only — the same rows read by an officer go
+   * to their review below, as they always have. An old requirement row does
+   * not carry the request's number, so it opens the list rather than the one.
+   */
+  if (portal === 'public') {
+    const statusPage = /^\/applications\/(\d+)$/.exec(path)
+    if (statusPage && type === 'message') return `/messages?application=${statusPage[1]}`
+    if (statusPage && type === 'request') return '/requests'
   }
 
   // Already on the reader's site: leave it whole, subpaths and all. Only the
@@ -466,7 +486,7 @@ export function NotificationsPage() {
             return (
               <li key={n.id} onClick={() => markOne(n)} className={shell}>
                 {n.link ? (
-                  <Link to={notificationHref(n.link, portal)} className="block transition-shadow hover:shadow-raised">
+                  <Link to={notificationHref(n.link, portal, n.type)} className="block transition-shadow hover:shadow-raised">
                     {row}
                   </Link>
                 ) : (

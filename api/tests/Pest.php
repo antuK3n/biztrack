@@ -15,6 +15,7 @@ use App\Services\WorkflowService;
 use App\Support\Ra11032;
 use App\Support\RequiredDocuments;
 use App\Support\SheetRequirements;
+use App\Support\StoreysRequired;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
@@ -528,6 +529,16 @@ function attachRequiredDocuments(Application|int $application): ?Application
     $application = $application instanceof Application ? $application : Application::find($application);
     if ($application === null) {
         return null;
+    }
+
+    /*
+     * And the No. of Storeys, which submit also refuses without (client, 10
+     * November 2026, StoreysRequired): the applicant who reached the Documents
+     * step went through Business Operation, where it is required. Asked of the
+     * same class the gate asks; a fixture that set its own count keeps it.
+     */
+    if (StoreysRequired::missing($application)) {
+        $application->update(['fee_profile' => [...($application->fee_profile ?? []), 'storeys' => 1]]);
     }
 
     foreach (RequiredDocuments::missingFor($application) as $type) {

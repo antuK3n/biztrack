@@ -223,8 +223,16 @@ const TYPE_TITLES: Record<string, string> = {
  * Issuance dates the applicant can never know: the office that issued the
  * document records them here during review, and they save straight back into
  * that permit type's office form.
+ *
+ * `kind: 'text'` since 10 November 2026, for OBO's "Others (specify)" on NBC
+ * Form B-13's Documents Submitted — moved off the owner's sheet to the office
+ * (client). Every key here must be in OfficerEditRules::SHEET_OFFICE_USE, or
+ * the API drops it from the owner's save but refuses nothing to the office.
  */
-const OFFICER_DATE_FIELDS: Record<string, { key: string; label: string; printed?: string }[]> = {
+const OFFICER_DATE_FIELDS: Record<
+  string,
+  { key: string; label: string; printed?: string; kind?: 'date' | 'text' }[]
+> = {
   OCCUPANCY: [
     /*
      * `printed`: the certificate carries this date, so a blank is a blank on
@@ -238,6 +246,11 @@ const OFFICER_DATE_FIELDS: Record<string, { key: string; label: string; printed?
       printed: 'The Certificate of Occupancy prints this beside the Building Permit No.',
     },
     { key: 'fsec_date', label: 'FSEC Date Issued' },
+    {
+      key: 'completion_other_document',
+      label: 'Other document submitted (specify)',
+      kind: 'text',
+    },
   ],
 }
 
@@ -549,11 +562,13 @@ function compactFeeFacts(
  * to correct, and a correction would have saved and silently reverted
  * (tester, 5 October 2026). Shown, never offered for correction or return.
  *
- * Only the keys derive() writes UNCONDITIONALLY. ZONING's floor area and
- * storeys are derived only when the fee profile holds a number, so they stay
- * correctable; listing them would lock an answer the applicant typed. Change
- * this with derive(). Kept here rather than beside OFFICE_FORM_INTERNAL_KEYS
- * because this screen is its only reader.
+ * Only the keys derive() writes UNCONDITIONALLY. ZONING's floor area is
+ * derived only when the fee profile holds a number, so it stays correctable;
+ * listing it would lock an answer the applicant typed. The storey count and
+ * the owner's address come by the sheet's `locked_answers` marker instead
+ * (see officeFormKeyIsDerived). Change this with derive(). Kept here rather
+ * than beside OFFICE_FORM_INTERNAL_KEYS because this screen is its only
+ * reader.
  */
 const OFFICE_FORM_DERIVED_KEYS: Record<OfficeFormCode, readonly string[]> = {
   ZONING: ['application_date', 'application_type', 'site_is_rented'],
@@ -577,13 +592,22 @@ const OFFICE_FORM_DERIVED_KEYS: Record<OfficeFormCode, readonly string[]> = {
     'denr_remarks',
   ],
   FSIC: ['application_date', 'certificate_applied_for'],
-  // Date of Completion is set by derive() since 6 October 2026, never typed.
-  OCCUPANCY: ['application_date', 'completion_date'],
+  // Date of Completion is set by derive() since 6 October 2026, never typed;
+  // Documents Submitted is ticked from the uploads since 10 November 2026.
+  OCCUPANCY: ['application_date', 'completion_date', 'completion_documents'],
 }
 
-/** Does the API write this answer itself, so nobody may correct it? */
-function officeFormKeyIsDerived(code: string, key: string): boolean {
-  return OFFICE_FORM_DERIVED_KEYS[code as OfficeFormCode]?.includes(key) ?? false
+/**
+ * Does the API write this answer itself, so nobody may correct it?
+ *
+ * Also the CONDITIONAL ones, by the sheet's own `locked_answers` marker
+ * (client, 10 November 2026: storeys from Business Operation, the owner's
+ * address and ZIP from the account). Listed there only when derive() filled
+ * them on this read, so a typed answer stays correctable.
+ */
+function officeFormKeyIsDerived(code: string, key: string, data?: Record<string, unknown> | null): boolean {
+  const locked = typeof data?.locked_answers === 'string' ? data.locked_answers.split(',') : []
+  return (OFFICE_FORM_DERIVED_KEYS[code as OfficeFormCode]?.includes(key) ?? false) || locked.includes(key)
 }
 
 /** One answer the applicant submitted, presented as a record, never a control. */
@@ -3001,7 +3025,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
            * The applicant cannot change it, so returning the filing over one
            * asks for a fix nobody can make. 5 October 2026.
            */
-          .filter((key) => !officeFormKeyIsDerived(form.permit_type_code, key))
+          .filter((key) => !officeFormKeyIsDerived(form.permit_type_code, key, form.form_data))
           .sort(
             (a, b) =>
               officeFormFieldRank(form.permit_type_code, a) -
@@ -4239,7 +4263,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
     try {
       const payload = Object.fromEntries(group.fields.map((f) => [f.key, f.value || null]))
       await officeFormsApi.save(app.id, group.code, payload)
-      setIssuedNote(`${group.name} issuance dates saved.`)
+      setIssuedNote(`${group.name} office entries saved.`)
       reload()
     } catch (err) {
       setActionError(toApiError(err).message)
@@ -4267,6 +4291,8 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
 
       return
     }
+    // Approve is shut while the amendment waits for its clearance.
+    if (amendmentWait.length > 0) return
     // The API's own one-line refusal, said before the request.
     if (ticksOtherPermits && otherPermitIds.length === 0) {
       setActionError('Tick the other permits this business needs.')
@@ -4695,6 +4721,35 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
     data.department.code === 'BPLO' &&
     app.status === 'for_approval' &&
     app.application_type === 'new'
+  /*
+   * ── An amendment waiting for its Zoning Clearance ──────────────────────
+   *
+   * Client, 10 November 2026, choosing "Waiting for Zoning instead of an
+   * error": a move carries a Zoning Clearance, and `approveAmendment`
+   * refused BPLO's Approve with a red bar until CPDO issued it. Approve is
+   * shut beforehand now (aria-disabled, AGENTS.md §6.2) with an amber line
+   * saying what it waits for. The server's refusal stays as the safety net;
+   * BPLO is told when it clears (`tellBploAmendmentIsClear`).
+   *
+   * BPLO's seat only: CPDO opens the same amendment to approve its own
+   * clearance, which this must never shut.
+   */
+  const amendmentWait =
+    data.department.code === 'BPLO' && app.application_type === 'amendment'
+      ? (app.amendment_waiting_for ?? [])
+      : []
+  const amendmentWaitLine = amendmentWait
+    .map((w) => {
+      const state =
+        w.state === 'with_office'
+          ? `with ${w.office ?? 'its office'}`
+          : w.state === 'with_applicant'
+            ? 'sent back to the applicant'
+            : 'not handed in yet'
+
+      return `Waiting for ${w.name}${w.office ? ` (${w.office})` : ''}: ${state}`
+    })
+    .join('. ')
   const otherPermitChoices = OTHER_PERMIT_CHOICES.flatMap(([code, label]) => {
     const type = (permitTypesRef.data ?? []).find((t) => t.code === code)
 
@@ -5351,6 +5406,8 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                    * asking the officer whether they are sure.
                    */
                   onClick={() => {
+                    // Shut while the amendment waits; the amber line says why.
+                    if (amendmentWait.length > 0) return
                     if (ticksOtherPermits && otherPermitIds.length === 0) {
                       setActionError('Tick the other permits this business needs.')
 
@@ -5359,10 +5416,18 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                     setConfirmingApprove(true)
                   }}
                   disabled={busy}
-                  aria-disabled={categoryMissing}
-                  aria-describedby={categoryMissing ? 'approve-blocked-why' : undefined}
+                  aria-disabled={categoryMissing || amendmentWait.length > 0}
+                  aria-describedby={
+                    categoryMissing
+                      ? 'approve-blocked-why'
+                      : amendmentWait.length > 0
+                        ? 'approve-waiting-why'
+                        : undefined
+                  }
                   className={`rounded-md px-4 py-1.5 text-sm font-semibold text-white underline underline-offset-2 disabled:opacity-60 ${
-                    categoryMissing ? 'bg-s-green/50' : 'bg-s-green hover:brightness-110'
+                    categoryMissing || amendmentWait.length > 0
+                      ? 'cursor-not-allowed bg-s-green/50'
+                      : 'bg-s-green hover:brightness-110'
                   }`}
                 >
                   Approve
@@ -5575,6 +5640,20 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             For Office Use Only
           </a>{' '}
           before you can approve.
+        </p>
+      )}
+
+      {/*
+        Why Approve is shut on an amendment (client, 10 November 2026):
+        amber, because nothing has failed — the move is waiting for CPDO.
+      */}
+      {amendmentWait.length > 0 && app.status === 'for_approval' && (
+        <p
+          id="approve-waiting-why"
+          role="status"
+          className="mb-4 rounded-lg border-l-4 border-s-orange bg-s-orange-tint px-4 py-3 text-sm text-ink"
+        >
+          {amendmentWaitLine}.
         </p>
       )}
 
@@ -6249,7 +6328,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                        * (`$derived + $formData`, tester 5 October 2026).
                        */
                       editing &&
-                      !officeFormKeyIsDerived(form.permit_type_code, key) &&
+                      !officeFormKeyIsDerived(form.permit_type_code, key, form.form_data) &&
                       (editRules.data?.sheets[form.permit_type_code]?.clerical ?? []).includes(key) ? (
                         <div key={key} className={`min-w-0 ${spanForAnswer(officeFormValueText(key, value))}`}>
                           <p className="text-xs leading-snug text-ink-muted">
@@ -6274,7 +6353,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                           className={spanForAnswer(officeFormValueText(key, value))}
                           notes={[{ code: key, permitTypeCode: form.permit_type_code }]}
                           lockTip={
-                            officeFormKeyIsDerived(form.permit_type_code, key)
+                            officeFormKeyIsDerived(form.permit_type_code, key, form.form_data)
                               ? 'Filled in by the system from the filing.'
                               : (editRules.data?.sheets[form.permit_type_code]?.office_use ?? []).includes(key)
                                 ? 'Your office’s own entry — fill it under For Office Use Only.'
@@ -7481,13 +7560,12 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
             {issuedGroups.map((group) => (
               <div key={group.code} className="mt-3 border-t border-officeuse-border pt-2">
                 <p className="text-[11px] font-bold uppercase tracking-wide text-amber-800">
-                  {group.name} · Issuance Dates
+                  {group.name} · Office Entries
                 </p>
                 {/* Only while editing: read-only, the heading above says it. */}
                 {editing && (
                   <p className="mt-1 text-xs text-ink-secondary">
-                    Enter the dates the issuing office released these documents. Applicants are
-                    not asked for them.
+                    Recorded by your office. Applicants are not asked for these.
                   </p>
                 )}
                 <div className="mt-1 grid gap-x-6 gap-y-2 sm:grid-cols-2 sm:items-end lg:grid-cols-4">
@@ -7496,8 +7574,9 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                       <label key={field.key} className="block">
                         <FieldLabel required={Boolean(field.printed)}>{field.label}</FieldLabel>
                         <input
-                          type="date"
-                          max={todayISO()}
+                          type={field.kind === 'text' ? 'text' : 'date'}
+                          max={field.kind === 'text' ? undefined : todayISO()}
+                          maxLength={field.kind === 'text' ? 255 : undefined}
                           className={officeInput}
                           value={field.value}
                           onChange={(e) =>
@@ -7515,7 +7594,10 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
                       </label>
                     ) : (
                       <div key={field.key}>
-                        <OfficeReadout label={field.label} value={field.value ? formatDate(field.value) : ''} />
+                        <OfficeReadout
+                          label={field.label}
+                          value={field.value && field.kind !== 'text' ? formatDate(field.value) : field.value}
+                        />
                         {field.printed && !field.value && (
                           <p className="mt-1 text-xs text-amber-800">
                             Not recorded yet. {field.printed} Edit the sheet to record it before passing the visit.

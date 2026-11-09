@@ -2,10 +2,12 @@ import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } fr
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { MapPicker } from '../../components/MapPicker'
 import {
+  EMERGENCY_ERROR,
   GENDERS,
   ORGANIZATION_FORMS,
   TIN_ERROR,
   emailValid,
+  emergencyNumberValid,
   genderLabel,
   lotAreaValid,
   percentValid,
@@ -15,6 +17,7 @@ import {
   tinValid,
   websiteValid,
 } from '../../lib/fieldRules'
+import { formatCountInput, formatDecimalInput, stripDigits } from '../../lib/numberInput'
 /* Answers saved before the API will accept a business — see its docblock. */
 import { wizardDrafts } from '../../lib/resources'
 import { mainFormTargets } from '../../lib/returnTargets'
@@ -660,6 +663,45 @@ const BUSINESS_PERMIT_CODE = 'BUSINESS'
  */
 const HELD_DOC_PREFIX = 'HELD_'
 
+/**
+ * The new owner's name on an amendment, in the four parts the form asks
+ * (`AmendableFields::OWNER_FIELDS`), and the two of them the server requires
+ * whenever any part is given (`ownershipNameRefusal`).
+ *
+ * Client, 10 November 2026: changing only the owner's first name ended at
+ * Submit with "The Surname field is required." Each part was its own row
+ * with an empty New box, so only the typed part was sent. Typing in any part
+ * now fills the others from the record, and the step itself checks the pair,
+ * so the rule is met on the screen rather than discovered at the end.
+ */
+const AMEND_OWNER_PARTS = [
+  'owner_surname',
+  'owner_given_name',
+  'owner_middle_name',
+  'owner_suffix',
+] as const
+// The two that can be "none" — `AmendableFields::CLEARABLE_OWNER_FIELDS`.
+const AMEND_CLEARABLE_OWNER_PARTS = ['owner_middle_name', 'owner_suffix'] as const
+const AMEND_OWNER_REQUIRED: Record<string, { error: string; missing: string }> = {
+  owner_surname: { error: 'Enter the new owner’s surname.', missing: 'The new owner’s surname' },
+  owner_given_name: {
+    error: 'Enter the new owner’s given name.',
+    missing: 'The new owner’s given name',
+  },
+}
+
+function isAmendOwnerPart(field: string): boolean {
+  return (AMEND_OWNER_PARTS as readonly string[]).includes(field)
+}
+
+/** Surname / Given Name left blank while another owner part is filled. */
+function amendOwnerGaps(values: Record<string, string | null | undefined>): string[] {
+  const filled = (field: string) => (values[field] ?? '').trim() !== ''
+  if (!AMEND_OWNER_PARTS.some(filled)) return []
+
+  return Object.keys(AMEND_OWNER_REQUIRED).filter((field) => !filled(field))
+}
+
 /** An attachment already on the draft: the id is what a removal needs. */
 interface UploadedFile {
   id: number
@@ -680,6 +722,49 @@ interface UploadedFile {
 const REVIEW_SECTIONS = ['address', 'business', 'operation', 'documents'] as const
 
 type ReviewSectionName = (typeof REVIEW_SECTIONS)[number]
+
+/*
+ * The two answer previews on Review's "ready to submit" card: an amendment's
+ * Changes requested list, and a business-permit renewal's fee estimate.
+ * They fold with the four sections, so "Collapse all" really brings Submit
+ * within reach — a nine-row change list stayed open under it and kept Submit
+ * a screen away (client, 10 November 2026). Folded, each is one line with a
+ * Show button; the heading, the next-step sentence and Submit never fold.
+ */
+type ReviewPanelName = 'changes' | 'fees'
+
+type ReviewFoldName = ReviewSectionName | ReviewPanelName
+
+/**
+ * Show / Hide for one of those previews. A button with aria-expanded and
+ * aria-controls rather than a <details>, which the page asserts it has none
+ * of. The two would read "Show" twice, so the accessible name says which
+ * (AGENTS.md 6.2) and still starts with the visible word.
+ */
+function ReviewFoldToggle({
+  open,
+  onToggle,
+  controls,
+  what,
+}: {
+  open: boolean
+  onToggle: () => void
+  controls: string
+  what: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      aria-controls={controls}
+      aria-label={`${open ? 'Hide' : 'Show'} ${what}`}
+      className="text-sm font-semibold text-royal underline underline-offset-2 hover:text-royal-hover"
+    >
+      {open ? 'Hide' : 'Show'}
+    </button>
+  )
+}
 
 const TYPE_META: Record<ApplicationType, { title: string; ref: string }> = {
   new: {
@@ -1754,8 +1839,10 @@ function FormSheet({
  * One numbered question on the Location & Zoning step (Ken's layout, 27
  * September 2026: one column, in the order people answer them).
  *
- * The number is always shown, done or not, because the map's lock names the
- * steps by number ("once steps 1 and 2 are answered"). Done is said in words
+ * The number is always shown, done or not, because the order is the
+ * instruction. (The map's lock named the steps by number until the barangay
+ * and the map shared a card, 10 November 2026; it names them in words now.)
+ * Done is said in words
  * beside the title, with a tick, and the number's circle fills: the fill
  * alone would be colour carrying meaning (DESIGN.md, Never Color Alone).
  *
@@ -1783,10 +1870,11 @@ function LocationStep({
     <li className="list-none">
       <section
         aria-labelledby={headingId}
-        className="rounded-2xl bg-white px-4 py-5 shadow-card sm:px-6"
+        /* `py-4`/`mb-3` (were 5 and 4): the compact pass, 10 November 2026. */
+        className="rounded-2xl bg-white px-4 py-4 shadow-card sm:px-6"
         data-testid={`location-step-${n}`}
       >
-        <div className="mb-4 flex items-start gap-3">
+        <div className="mb-3 flex items-start gap-3">
           <span
             aria-hidden="true"
             className={`tnum grid h-8 w-8 shrink-0 place-items-center rounded-full text-sm font-bold ${
@@ -2094,8 +2182,10 @@ function LinesStep({
                    * all, so it now carries a full-weight label and a full-size
                    * input (see the note on the panel above). Still
                    * under the trade it belongs to, still no card of its own.
+                   * `mt-3` (was 4): the compact pass, 10 November 2026; the
+                   * size and weight Zoning 11 asked for are untouched.
                    */}
-                  <label className="mt-4 block">
+                  <label className="mt-3 block">
                     <span className="mb-1.5 block text-base font-bold text-ink">
                       Products / Services <span className="text-s-red" aria-hidden="true">*</span>
                     </span>
@@ -2115,6 +2205,7 @@ function LinesStep({
                       // snacks" was an answer, and a sari-sari store owner is not
                       // selling milk tea.
                       placeholder="What customers buy from you, in a few words"
+                      maxLength={1000}
                       className="w-full rounded-lg border-2 border-input-border bg-white px-3 py-2.5 text-base text-ink placeholder:text-ink-muted focus:border-royal focus:outline-none focus:ring-2 focus:ring-royal/30"
                     />
                     {/*
@@ -3734,6 +3825,12 @@ export function ApplyWizard() {
    */
   const amendTypedRef = useRef(amendTyped)
   const amendAutoFilledRef = useRef<Record<string, string | null>>({})
+  /*
+   * The owner-name parts filled from the record when the applicant started
+   * typing one of them (see `amendOwnerPrefill`), or null before that. Kept
+   * so emptying the typed part again can take back exactly what was filled.
+   */
+  const amendOwnerPrefillRef = useRef<Record<string, string> | null>(null)
   const amendReverseAbortRef = useRef<AbortController | null>(null)
   useEffect(() => {
     amendTypedRef.current = amendTyped
@@ -3835,18 +3932,24 @@ export function ApplyWizard() {
    * open it — and being able to review before submitting is the entire point
    * of the screen.
    */
-  const [sectionOpen, setSectionOpen] = useState<Record<ReviewSectionName, boolean>>({
+  /*
+   * The two previews on the "ready to submit" card share this state since
+   * 10 November 2026 (`ReviewPanelName`), so "Collapse all" folds them too.
+   */
+  const [sectionOpen, setSectionOpen] = useState<Record<ReviewFoldName, boolean>>({
     address: true,
     business: true,
     operation: true,
     documents: true,
+    changes: true,
+    fees: true,
   })
-  const toggleSection = (name: ReviewSectionName) =>
+  const toggleSection = (name: ReviewFoldName) =>
     setSectionOpen((s) => ({ ...s, [name]: !s[name] }))
   /*
    * `allSectionsOpen` stood here and asked all four, which is the wrong
    * question for a filing that draws fewer — see `allReviewSectionsOpen`,
-   * declared once `sequence` is known.
+   * declared once `sequence` and the amendment's rows are known.
    */
   const setAllSections = (open: boolean) =>
     setSectionOpen({
@@ -3854,6 +3957,8 @@ export function ApplyWizard() {
       business: open,
       operation: open,
       documents: open,
+      changes: open,
+      fees: open,
     })
 
   /*
@@ -5082,8 +5187,11 @@ export function ApplyWizard() {
    */
   const reviewSections = REVIEW_SECTIONS.filter((name) => sequence.includes(name))
   const reviewHasSections = reviewSections.length > 0
-  /* Asked of the sections on screen, not of all four. */
-  const allReviewSectionsOpen = reviewSections.every((name) => sectionOpen[name])
+  /*
+   * `allReviewSectionsOpen` stood here; it now also asks the "ready to
+   * submit" card's previews, which need `amendRequested`, so it is declared
+   * after that (search `reviewPanels`).
+   */
   const stepIndex = Math.min(step, sequence.length - 1)
   const phase: Phase = sequence[stepIndex]
 
@@ -5468,6 +5576,7 @@ export function ApplyWizard() {
           label: OPERATION_LABELS.floor_area_sqm,
           value: feeDraft.floor_area_sqm,
         },
+        { label: OPERATION_LABELS.storeys, value: feeDraft.storeys },
         { label: OPERATION_LABELS.employees, value: feeDraft.employees },
         {
           label: OPERATION_LABELS.male_employees,
@@ -6042,6 +6151,26 @@ export function ApplyWizard() {
   const amendRequested = useMemo(() => amendRows.filter((r) => r.requested), [amendRows])
 
   /*
+   * The "ready to submit" card's previews this filing draws (client,
+   * 10 November 2026: "Collapse all" must fold them too). Same conditions as
+   * the card itself: the change list on an amendment that asked for any, the
+   * fee estimate on a business-permit renewal. A new filing and a
+   * clearance-only renewal draw neither.
+   */
+  const reviewPanels: ReviewPanelName[] = [
+    ...(applicationType === 'amendment' && amendRequested.length > 0 ? ['changes' as const] : []),
+    ...(applicationType !== 'amendment' && applicationType !== 'new' && !clearanceOnlyRenewal
+      ? ['fees' as const]
+      : []),
+  ]
+  /* The collapse control shows when anything on Review can fold. */
+  const reviewHasFolds = reviewHasSections || reviewPanels.length > 0
+  /* Asked of what is on screen — sections and previews — not of all six. */
+  const allReviewSectionsOpen = [...reviewSections, ...reviewPanels].every(
+    (name) => sectionOpen[name],
+  )
+
+  /*
    * `clearanceDecisions` is gone. Review & Submit used to list which of the six
    * had been applied for and which had a copy on file — a useful list when the
    * clearances were step 6 and the submission carried them.
@@ -6549,7 +6678,8 @@ export function ApplyWizard() {
           // Inspectors turn up unannounced; somebody has to be reachable.
           if (!form.emergency_contact_name.trim()) missing.push('Emergency Contact Person')
           if (!form.emergency_contact_number.trim()) missing.push('Emergency Contact Number')
-          else if (!phoneValid(form.emergency_contact_number)) {
+          // A mobile, as the box's hint says; the API refuses a landline too.
+          else if (!emergencyNumberValid(form.emergency_contact_number)) {
             missing.push('A valid Emergency Contact Number')
           }
           return missing
@@ -6630,6 +6760,16 @@ export function ApplyWizard() {
                   `A map pin inside ${amendBarangayName ?? 'the barangay you chose'}`,
                 )
               }
+            }
+
+            /*
+             * A new owner needs a Surname and a Given Name — the server's
+             * `ownershipNameRefusal`, asked here so it is not met first at
+             * Submit (client, 10 November 2026). Read off the boxes, which
+             * Continue sends before it advances.
+             */
+            for (const field of amendOwnerGaps(amendTyped)) {
+              missingMove.push(AMEND_OWNER_REQUIRED[field].missing)
             }
 
             return missingMove
@@ -6746,6 +6886,8 @@ export function ApplyWizard() {
        */
       amendChangesBarangay,
       amendBarangayName,
+      // The owner-name check reads the boxes, not the saved rows.
+      amendTyped,
       /*
        * And the whole Section A object on a RENEWAL, because that case reads
        * five of its fields and the step's gate is only correct if it
@@ -7277,9 +7419,9 @@ export function ApplyWizard() {
         ? 'Enter someone we can reach if an inspector cannot reach you.'
         : '',
     emergency_contact_number: form.emergency_contact_number.trim()
-      ? phoneValid(form.emergency_contact_number)
+      ? emergencyNumberValid(form.emergency_contact_number)
         ? ''
-        : PHONE_ERROR
+        : EMERGENCY_ERROR
       : touched.emergency_contact_number
         ? 'Enter a contact number for that person.'
         : '',
@@ -7675,6 +7817,10 @@ export function ApplyWizard() {
     if (applicationType === 'amendment' && phase === 'amendments') {
       const rows = await flushAmendments()
       if (!rows.some((r) => r.requested)) return
+      // And a new owner named in full, off the same saved rows.
+      if (amendOwnerGaps(Object.fromEntries(rows.map((r) => [r.field, r.new_value]))).length > 0) {
+        return
+      }
     } else if (stepMissing.length > 0) {
       return
     }
@@ -7937,8 +8083,13 @@ export function ApplyWizard() {
   function renderAmendControl(row: AmendmentRow) {
     const value = amendTyped[row.field] ?? ''
     const id = `amend-${row.field}`
+    const ownerGap = amendOwnerGaps(amendTyped).includes(row.field)
 
-    const type = (next: string) => setAmendTyped((t) => ({ ...t, [row.field]: next }))
+    const type = (next: string) => {
+      // Worked out before the update, not inside it: React may run an updater twice.
+      const fills = amendOwnerPrefill(row.field, next)
+      setAmendTyped((t) => ({ ...t, [row.field]: next, ...fills }))
+    }
     const choose = (next: string) => {
       type(next)
       /*
@@ -8213,9 +8364,32 @@ export function ApplyWizard() {
           <input
             id={id}
             value={value}
-            onChange={(e) => type(e.target.value)}
+            /*
+             * A count or an area keeps only what can be one (10 November
+             * 2026): floor area and the five employee / vehicle counts took
+             * letters, which the API then refused on blur. No thousands
+             * comma — the value is sent as typed and judged `numeric`.
+             */
+            onChange={(e) =>
+              type(
+                row.type === 'integer'
+                  ? formatCountInput(e.target.value)
+                  : row.type === 'number'
+                    ? formatDecimalInput(e.target.value)
+                    : e.target.value,
+              )
+            }
             onBlur={() => void saveAmendment(row.field)}
-            placeholder="leave blank if unchanged"
+            /*
+             * A middle name or suffix arrives filled from the record, and
+             * there an empty box means the new owner has none, not
+             * "unchanged" (`AMEND_CLEARABLE_OWNER_PARTS`).
+             */
+            placeholder={
+              (AMEND_CLEARABLE_OWNER_PARTS as readonly string[]).includes(row.field)
+                ? 'Leave blank if the new owner has none.'
+                : 'leave blank if unchanged'
+            }
             /*
              * `inputMode` and not `type="number"`: a number input drops what
              * it cannot parse mid-edit, so a half-typed decimal disappears as
@@ -8226,6 +8400,9 @@ export function ApplyWizard() {
             }
             maxLength={255}
             disabled={amendBusy}
+            // A new owner's blank Surname / Given Name, read out with its bubble.
+            aria-invalid={ownerGap || undefined}
+            aria-describedby={ownerGap ? `${id}-error` : undefined}
             className={inputCls}
           />
         )
@@ -8279,8 +8456,81 @@ export function ApplyWizard() {
     )
   }
 
+  /**
+   * The other owner-name parts to fill as one of them is typed.
+   *
+   * Client, 10 November 2026: a new owner is the four parts together, so
+   * typing the first name alone fills Surname, Middle Name and Suffix from
+   * the record — still editable — and a first-name correction is complete
+   * as it stands. Only empty boxes are filled, and only the first time; a
+   * part the applicant has since cleared stays cleared. Emptying the typed
+   * part again takes the filled ones back while they are untouched, so a
+   * slip does not leave a change of owner asking for the same name.
+   */
+  function amendOwnerPrefill(field: string, next: string): Record<string, string> {
+    if (!isAmendOwnerPart(field)) return {}
+
+    const boxes = amendTypedRef.current
+    const others = AMEND_OWNER_PARTS.filter((part) => part !== field)
+    const filled = amendOwnerPrefillRef.current
+
+    if (next.trim() !== '') {
+      if (filled !== null) return {}
+
+      const fills: Record<string, string> = {}
+      for (const part of others) {
+        if ((boxes[part] ?? '').trim() !== '') continue
+        const recorded = amendRows.find((r) => r.field === part)?.current_value ?? ''
+        if (recorded !== '') fills[part] = recorded
+      }
+      amendOwnerPrefillRef.current = fills
+
+      return fills
+    }
+
+    if (filled === null) return {}
+    if (!others.every((part) => (boxes[part] ?? '') === (filled[part] ?? ''))) return {}
+    amendOwnerPrefillRef.current = null
+
+    return Object.fromEntries(Object.keys(filled).map((part) => [part, '']))
+  }
+
   async function saveAmendment(field: string, chosen?: string): Promise<void> {
     await saveAmendmentRaw(field, chosen)
+
+    /*
+     * The owner-name parts filled with this one are saved with it. Nobody
+     * blurs a box they never typed in, and leaving them to Continue would
+     * lose them to a jump by the step pills. One at a time, as
+     * `flushAmendments` does, so two answers cannot land out of order.
+     */
+    if (!isAmendOwnerPart(field)) return
+
+    // `saveAmendmentRaw` decides each: a value, a "none", a withdrawal or nothing.
+    for (const part of AMEND_OWNER_PARTS) {
+      if (part === field) continue
+      await saveAmendmentRaw(part, (amendTypedRef.current[part] ?? '').trim())
+    }
+  }
+
+  /**
+   * Whether an empty Middle Name or Suffix box is an explicit "none".
+   *
+   * Client, 10 November 2026 ("Cleared = none"): while a new owner is being
+   * named and the record holds a middle name or suffix, an empty box means
+   * the new owner has none. Left out instead, approval would keep the
+   * seller's (`AmendableFields::flush`). Sent as a null value, which the
+   * server writes empty and the screens read as "(none)".
+   */
+  function amendOwnerNone(field: string): boolean {
+    if (!(AMEND_CLEARABLE_OWNER_PARTS as readonly string[]).includes(field)) return false
+
+    const recorded = amendRows.find((r) => r.field === field)?.current_value ?? ''
+    if (recorded.trim() === '') return false
+
+    const boxes = amendTypedRef.current
+
+    return AMEND_OWNER_PARTS.some((part) => part !== field && (boxes[part] ?? '').trim() !== '')
   }
 
   /**
@@ -8315,16 +8565,23 @@ export function ApplyWizard() {
     }
 
     const row = amendRows.find((r) => r.field === field)
-    // Untouched and never requested: nothing to send.
-    if (row !== undefined && !row.requested && typed === '') return null
-    // Unchanged since the last save.
-    if (row !== undefined && (row.new_value ?? '') === typed) return null
+    const none = typed === '' && amendOwnerNone(field)
+    if (none) {
+      // Already asked for as "none".
+      if (row !== undefined && row.requested && row.new_value === null) return null
+    } else {
+      // Untouched and never requested: nothing to send.
+      if (row !== undefined && !row.requested && typed === '') return null
+      // Unchanged since the last save. A "none" row is not '' here: it goes.
+      if (row !== undefined && row.requested && row.new_value === typed) return null
+    }
 
     setAmendBusy(true)
     setAmendError(null)
     try {
-      const rows =
-        typed === ''
+      const rows = none
+        ? await applications.setAmendments(applicationId, [{ field, new_value: null }])
+        : typed === ''
           ? await applications.removeAmendment(applicationId, field)
           : await applications.setAmendments(applicationId, [{ field, new_value: typed }])
       /*
@@ -10299,11 +10556,13 @@ export function ApplyWizard() {
             It says what the button does instead.
           */}
           {/*
-            Hidden when this Review draws no sections, because a control that
-            cannot do anything is worse than no control: it is read as broken,
-            which is exactly how it was reported.
+            Hidden when this Review draws nothing that folds, because a control
+            that cannot do anything is worse than no control: it is read as
+            broken, which is exactly how it was reported. Since 10 November
+            2026 it also folds the "ready to submit" card's change list and fee
+            estimate (`reviewPanels`).
           */}
-          {reviewHasSections && (
+          {reviewHasFolds && (
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <button
                 type="button"
@@ -10387,8 +10646,18 @@ export function ApplyWizard() {
            * The address comes after the pin because the pin fills the street
            * in (`fillAddressFromPin`); asking for the street first and then
            * overwriting it would be the form arguing with the applicant.
+           *
+           * ── Three cards since 10 November 2026 ──
+           *
+           * Client ("Merge cards, shared grid"), to make this step as compact
+           * as Business Information: the five cards became three, in the same
+           * order. 1 trade; 2 barangay and pin, because the barangay is what
+           * unlocks and zooms the map; 3 address and emergency contact on one
+           * `formGridCls` sheet. The map is still locked until the trade and
+           * the barangay are answered — its caption names them in words now,
+           * not by step number. Required/optional rules did not change.
            */}
-          <ol className="space-y-5">
+          <ol className="space-y-4">
             {/*
              * Step 1. Item 69: the one and only Line of Business question, and
              * Products / Services with it.
@@ -10426,18 +10695,29 @@ export function ApplyWizard() {
               )}
             </LocationStep>
 
+            {/*
+              Steps 2 (barangay) and 3 (pin) were two cards until 10 November
+              2026 (client, "Merge cards, shared grid"): the barangay is the
+              question that unlocks and zooms the map, so they are one card,
+              the select a quarter of the row beside its one-line rule.
+            */}
             <LocationStep
               n={2}
-              title="Barangay"
+              title="Barangay and map pin"
               required
-              done={form.barangay_id !== ''}
+              done={form.barangay_id !== '' && form.latitude !== null}
             >
-              <div className="relative">
+              <div className={formGridCls}>
+              <div className={`relative ${formCell.quarter}`}>
                 <label className="block">
-                  {/* The step's heading names this field on screen; said once. The
-                      full name stays for the "still needed" list and the review. */}
-                  <span className="sr-only">Barangay Name</span>
+                  {/* "Name" is for the "still needed" list and the review, which
+                      name the field away from this card; on screen "Barangay"
+                      is enough. */}
+                  <FieldLabel required>
+                    Barangay<span className="sr-only"> Name</span>
+                  </FieldLabel>
                   <select
+                    aria-describedby="barangay-pin-hint"
                     id="address-barangay"
                     value={form.barangay_id}
                     /*
@@ -10517,10 +10797,23 @@ export function ApplyWizard() {
                   </FieldError>
                 )}
               </div>
+              {/*
+                "Choose your barangay first" stays even though the map is
+                locked until one is chosen: it is the reason for the lock, said
+                where the applicant reads before touching the map, and the
+                second sentence is the rule both the map and the API enforce
+                (Zoning 3). It moved out of the amber note to sit beside the
+                select it is about (10 November 2026). `self-end` puts it on
+                the select's line, not its label's.
+              */}
+              <p
+                id="barangay-pin-hint"
+                className="col-span-12 self-end text-sm text-ink-secondary @xl:col-span-6 @xl:pb-2 @4xl:col-span-9"
+              >
+                Choose your barangay first. Your pin has to be inside it.
+              </p>
+              </div>
 
-            </LocationStep>
-
-            <LocationStep n={3} title="Pin your business on the map" required done={form.latitude !== null}>
               {/*
                * Why the pin has to be right, said before it is placed (client,
                * 23 September 2026). CPDO inspects the spot the pin names; a
@@ -10531,18 +10824,16 @@ export function ApplyWizard() {
                * (DESIGN.md, Red Means Stop). The bold lead-in carries it in
                * words, so it survives with colour off.
                *
-               * "Choose your barangay first" stays even though the map is now
-               * locked until one is chosen: it is the reason for the lock, said
-               * where the applicant reads before touching the map, and the next
-               * sentence is the rule both the map and the API enforce (Zoning 3).
+               * One line since 10 November 2026 (it was three): the barangay
+               * rule moved beside the select above, and the warning kept its
+               * three facts — exact spot, disapproval, forfeited fees.
                */}
               <p
                 id="pin-accuracy-note"
-                className="mb-4 rounded-xl border border-s-yellow bg-s-yellow-tint px-4 py-3 text-sm leading-relaxed text-amber-900"
+                className="my-3 rounded-lg border border-s-yellow bg-s-yellow-tint px-3 py-1.5 text-sm text-amber-900"
               >
-                <span className="font-bold">Place the pin exactly on your business.</span> Choose
-                your barangay first. Your pin has to be inside it. A wrong location can get your
-                application disapproved, and any fees you paid will be forfeited.
+                <span className="font-bold">Place the pin exactly on your business.</span> A wrong
+                spot can get the application disapproved and any fees paid forfeited.
               </p>
               {/*
                * The map, and what it answers beside it.
@@ -10705,9 +10996,11 @@ export function ApplyWizard() {
                     {/* Two states, because telling somebody to click a map that is
                       not taking clicks yet sends them to a control that will not
                       answer. The lock's own sentence says what to do about it;
-                      this one says the pin is required either way. */}
+                      this one says the pin is required either way. It said
+                      "once steps 1 and 2 are answered" until the barangay and
+                      the map shared step 2 (10 November 2026). */}
                     {mapLocked
-                      ? 'Required: a pin. The map opens once steps 1 and 2 are answered.'
+                      ? 'Required: a pin. The map opens once your trade and barangay are chosen.'
                       : 'Required: click the map to drop a pin where your business is.'}
                   </p>
                 )}
@@ -10779,13 +11072,27 @@ export function ApplyWizard() {
               </div>
             </LocationStep>
 
-            <LocationStep n={4} title="Address" done={form.street.trim() !== ''}>
+            <LocationStep
+              n={3}
+              title="Address and emergency contact"
+              done={
+                form.street.trim() !== '' &&
+                form.emergency_contact_name.trim() !== '' &&
+                emergencyNumberValid(form.emergency_contact_number)
+              }
+            >
               {/*
                 Section A's grid (Proto's `formGridCls`) since 19 October 2026,
                 on the client's ask to use that layout on the other sections.
-                Three rows of a box each became two: the number, the street
-                and the block on one; the lot, its area and the landmark on
-                the next — the paper's order, with every box on a column line.
+
+                One sheet with the emergency contact since 10 November 2026
+                (client, "Merge cards, shared grid"; they were steps 4 and 5).
+                Two rows on a wide sheet, every box on a column line:
+                  House · Street (a third) · Block · Lot · Lot Area
+                  Landmark (a half) · Contact Person · Contact Number
+                The street is a third, not a half, so the row's five boxes fit
+                twelve columns. Halves and one column on narrower sheets, as
+                every `formCell` does.
               */}
               <div className={formGridCls}>
               <div className="contents">
@@ -10814,6 +11121,7 @@ export function ApplyWizard() {
                       <input
                         value={form.house_bldg_no}
                         onChange={(e) => update('house_bldg_no', e.target.value)}
+                        maxLength={120}
                         onBlur={() => touch('house_bldg_no')}
                         /*
                          * The shape of the answer, not an answer (AGENTS.md
@@ -10828,12 +11136,13 @@ export function ApplyWizard() {
                       />
                     </label>
                   </div>
-                  <div className={`relative ${formCell.half}`}>
+                  <div className={`relative ${formCell.third}`}>
                     <label className="block">
                       <FieldLabel required>Street</FieldLabel>
                       <input
                         value={form.street}
                         onChange={(e) => update('street', e.target.value)}
+                        maxLength={255}
                         onBlur={() => touch('street')}
                         // Shape, not an answer: "e.g. Gen. Luna Street" is a real
                         // Malabon street and read as a prefilled one. The barangay
@@ -10903,6 +11212,7 @@ export function ApplyWizard() {
                   <input
                     value={form.line2}
                     onChange={(e) => update('line2', e.target.value)}
+                    maxLength={255}
                     // "Nearest landmark" restated the label. This says what kind.
                     placeholder="A place nearby that people know"
                     className={inputCls}
@@ -10910,6 +11220,51 @@ export function ApplyWizard() {
                 </label>
               </div>
 
+              {/*
+                The emergency contact, a quarter each, beside the landmark. It
+                was its own card, "In case of emergency", whose heading let the
+                labels say only "Contact Person"; on the shared sheet the label
+                says "Emergency" itself, and the aria-label that used to carry
+                it is gone because the label now does (and adds "(required)").
+              */}
+              <div className={`relative ${formCell.quarter}`}>
+                <label className="block">
+                  <FieldLabel required>Emergency Contact Person</FieldLabel>
+                  <input
+                    value={form.emergency_contact_name}
+                    onChange={(e) => update('emergency_contact_name', e.target.value)}
+                    maxLength={255}
+                    onBlur={() => touch('emergency_contact_name')}
+                    placeholder="Full name"
+                    className={inputCls}
+                    aria-invalid={Boolean(fieldErrors.emergency_contact_name)}
+                  />
+                </label>
+                {fieldErrors.emergency_contact_name && (
+                  <FieldError>
+                    {fieldErrors.emergency_contact_name}
+                  </FieldError>
+                )}
+              </div>
+              <div className={`relative ${formCell.quarter}`}>
+                <label className="block">
+                  <FieldLabel required>Emergency Contact Number</FieldLabel>
+                  <input
+                    inputMode="tel"
+                    value={form.emergency_contact_number}
+                    onChange={(e) => update('emergency_contact_number', e.target.value)}
+                    onBlur={() => touch('emergency_contact_number')}
+                    placeholder="11 digits, starting 09"
+                    className={inputCls}
+                    aria-invalid={Boolean(fieldErrors.emergency_contact_number)}
+                  />
+                </label>
+                {fieldErrors.emergency_contact_number && (
+                  <FieldError>
+                    {fieldErrors.emergency_contact_number}
+                  </FieldError>
+                )}
+              </div>
               </div>
               {/*
                * Says the boxes were written by us, from the pin, and are
@@ -10928,58 +11283,6 @@ export function ApplyWizard() {
                     Filled in from your pin. Check it and fix anything that’s wrong.
                   </p>
                 )}
-              </div>
-            </LocationStep>
-
-            <LocationStep
-              n={5}
-              title="In case of emergency"
-              done={
-                form.emergency_contact_name.trim() !== '' &&
-                phoneValid(form.emergency_contact_number)
-              }
-            >
-              {/* Section A's grid: a name takes half the row, a phone number a quarter. */}
-              <div className={formGridCls}>
-                <div className={`relative ${formCell.half}`}>
-                  <label className="block">
-                    <FieldLabel required>Contact Person</FieldLabel>
-                    <input
-                      aria-label="Emergency Contact Person"
-                      value={form.emergency_contact_name}
-                      onChange={(e) => update('emergency_contact_name', e.target.value)}
-                      onBlur={() => touch('emergency_contact_name')}
-                      placeholder="Full name"
-                      className={inputCls}
-                      aria-invalid={Boolean(fieldErrors.emergency_contact_name)}
-                    />
-                  </label>
-                  {fieldErrors.emergency_contact_name && (
-                    <FieldError>
-                      {fieldErrors.emergency_contact_name}
-                    </FieldError>
-                  )}
-                </div>
-                <div className={`relative ${formCell.quarter}`}>
-                  <label className="block">
-                    <FieldLabel required>Contact Number</FieldLabel>
-                    <input
-                      inputMode="tel"
-                      aria-label="Emergency Contact Number"
-                      value={form.emergency_contact_number}
-                      onChange={(e) => update('emergency_contact_number', e.target.value)}
-                      onBlur={() => touch('emergency_contact_number')}
-                      placeholder="11 digits, starting 09"
-                      className={inputCls}
-                      aria-invalid={Boolean(fieldErrors.emergency_contact_number)}
-                    />
-                  </label>
-                  {fieldErrors.emergency_contact_number && (
-                    <FieldError>
-                      {fieldErrors.emergency_contact_number}
-                    </FieldError>
-                  )}
-                </div>
               </div>
             </LocationStep>
           </ol>
@@ -11460,6 +11763,7 @@ export function ApplyWizard() {
                   <input
                     value={form.name}
                     onChange={(e) => update('name', e.target.value)}
+                    maxLength={255}
                     onBlur={() => touch('name')}
                     className={inputCls}
                     aria-invalid={Boolean(fieldErrors.name)}
@@ -11477,6 +11781,7 @@ export function ApplyWizard() {
                 <input
                   value={form.trade_name}
                   onChange={(e) => update('trade_name', e.target.value)}
+                  maxLength={255}
                   onBlur={() => touch('trade_name')}
                   className={inputCls}
                   aria-invalid={Boolean(fieldErrors.trade_name)}
@@ -11589,6 +11894,7 @@ export function ApplyWizard() {
                       inputMode="email"
                       value={form.email}
                       onChange={(e) => update('email', e.target.value)}
+                      maxLength={255}
                       onBlur={() => touch('email')}
                       placeholder="business@example.com"
                       className={inputCls}
@@ -11602,6 +11908,7 @@ export function ApplyWizard() {
                     inputMode="url"
                     value={form.website}
                     onChange={(e) => update('website', e.target.value)}
+                    maxLength={255}
                     onBlur={() => touch('website')}
                     placeholder="yourbusiness.com.ph"
                     className={inputCls}
@@ -11673,7 +11980,8 @@ export function ApplyWizard() {
                   <FieldLabel required>10. Surname</FieldLabel>
                   <input
                     value={form.owner_surname}
-                    onChange={(e) => update('owner_surname', e.target.value)}
+                    onChange={(e) => update('owner_surname', stripDigits(e.target.value))}
+                    maxLength={100}
                     className={inputCls}
                   />
                 </label>
@@ -11681,7 +11989,8 @@ export function ApplyWizard() {
                   <FieldLabel required>11. Given Name</FieldLabel>
                   <input
                     value={form.owner_given_name}
-                    onChange={(e) => update('owner_given_name', e.target.value)}
+                    onChange={(e) => update('owner_given_name', stripDigits(e.target.value))}
+                    maxLength={100}
                     className={inputCls}
                   />
                 </label>
@@ -11689,7 +11998,8 @@ export function ApplyWizard() {
                   <FieldLabel optional>12. Middle Name</FieldLabel>
                   <input
                     value={form.owner_middle_name}
-                    onChange={(e) => update('owner_middle_name', e.target.value)}
+                    onChange={(e) => update('owner_middle_name', stripDigits(e.target.value))}
+                    maxLength={100}
                     className={inputCls}
                   />
                 </label>
@@ -11697,7 +12007,8 @@ export function ApplyWizard() {
                   <FieldLabel optional>13. Suffix</FieldLabel>
                   <input
                     value={form.owner_suffix}
-                    onChange={(e) => update('owner_suffix', e.target.value)}
+                    onChange={(e) => update('owner_suffix', stripDigits(e.target.value))}
+                    maxLength={20}
                     placeholder="Jr., III"
                     className={inputCls}
                   />
@@ -11817,7 +12128,7 @@ export function ApplyWizard() {
                         </FieldLabel>
                         <input
                           value={form.president_officer_name}
-                          onChange={(e) => update('president_officer_name', e.target.value)}
+                          onChange={(e) => update('president_officer_name', stripDigits(e.target.value))}
                           placeholder={oicIsProprietor ? '' : 'Full name'}
                           maxLength={255}
                           readOnly={oicIsProprietor}
@@ -12078,7 +12389,11 @@ export function ApplyWizard() {
             same column lines as items 1 to 4 inside FeeProfileStep, which is
             its own container of the same width.
           */}
-          <div className="@container mt-3 space-y-4">
+          {/*
+            `space-y-5` with no extra margin on items 1-4 (they had `mt-4` on
+            top of the `space-y-4`): the compact pass, 10 November 2026.
+          */}
+          <div className="@container mt-3 space-y-5">
             {/* Items 1-4 — business area, the employee counts, delivery units. */}
             {/*
             Section B items 1-4: business area, employees and their split, how
@@ -12090,7 +12405,7 @@ export function ApplyWizard() {
             `FeeProfileDraft`, so nothing about the calculation changed — only
             where the questions are put.
           */}
-            <div className="mt-4">
+            <div>
               <FeeProfileStep
                 scope="paper"
                 applicationType={applicationType}
@@ -12114,18 +12429,24 @@ export function ApplyWizard() {
              * See ECONOMIC_ORGANIZATIONS for why this is not the Type of
              * Registration question again: that one asks what the BUSINESS is,
              * this asks what this PREMISES is to it.
+             *
+             * ── One row of pills since 10 November 2026 ──
+             *
+             * They were six cards, three across, each with its explanation
+             * printed under the name — two rows of the sheet for one answer.
+             * Client ("Merge cards, shared grid"): one row of single-line pills,
+             * like Form of Organization on Business Information. The
+             * explanations are not dropped: each pill's `title` shows it on
+             * hover, and its `aria-describedby` reads it out, from sr-only
+             * text — as section A does with its hints.
              */}
-            <div>
+            <div className={formGridCls}>
+            <div className="col-span-12">
               <FieldLabel required>5. Economic Organization</FieldLabel>
               <div
                 role="radiogroup"
                 aria-label="Economic Organization"
-                /*
-                  `gap-x-5`, the section grid's gutter, so the columns of
-                  cards start on its column lines. Three across on a wide sheet
-                  (20 October 2026): six cards in two rows instead of three.
-                */
-                className="grid gap-x-5 gap-y-2.5 @xl:grid-cols-2 @3xl:grid-cols-3"
+                className="flex flex-wrap gap-2"
               >
                 {ECONOMIC_ORGANIZATIONS.map((eo) => {
                   const selected = form.economic_organization === eo.value
@@ -12135,34 +12456,43 @@ export function ApplyWizard() {
                       type="button"
                       role="radio"
                       aria-checked={selected}
+                      aria-describedby={`economic-organization-hint-${eo.value}`}
+                      title={eo.hint}
                       onClick={() => update('economic_organization', selected ? '' : eo.value)}
-                      className={`flex items-start gap-2.5 rounded-md border px-4 py-2.5 text-left transition-colors ${
+                      className={`flex grow items-center gap-2 whitespace-nowrap rounded-md border px-3.5 py-2 text-sm font-medium transition-colors ${
                         selected
                           ? 'border-royal bg-input text-ink'
                           : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
                       }`}
                     >
                       <span
-                        className={`mt-1 h-3.5 w-3.5 shrink-0 rounded-full border-2 ${
+                        className={`h-3.5 w-3.5 shrink-0 rounded-full border-2 ${
                           selected ? 'border-royal bg-royal' : 'border-input-border bg-white'
                         }`}
                       />
-                      <span className="min-w-0">
-                        <span className="block text-sm font-medium text-ink">{eo.label}</span>
-                        <span className="block text-xs text-ink-secondary">{eo.hint}</span>
-                      </span>
+                      {eo.label}
                     </button>
                   )
                 })}
               </div>
+              <div className="sr-only">
+                {ECONOMIC_ORGANIZATIONS.map((eo) => (
+                  <span key={eo.value} id={`economic-organization-hint-${eo.value}`}>
+                    {eo.hint}
+                  </span>
+                ))}
+              </div>
+            </div>
               {/*
                * On the paper this is "Others ____" — a blank you cannot tick
                * without filling in. So it opens with the choice and is listed
                * in "Still needed on this part" while it is empty: recording
                * "Others" with no other named says less than choosing nothing.
+               * Half the sheet's width since 10 November 2026: a few words
+               * of answer, not a paragraph.
                */}
               {form.economic_organization === 'others' && (
-                <div className="relative mt-3">
+                <div className={`relative ${formCell.half}`}>
                   <label className="block">
                     <FieldLabel required>Others — what kind of establishment is it?</FieldLabel>
                     <input
@@ -12211,6 +12541,12 @@ export function ApplyWizard() {
               back. Thirds also give 7 and 8 room to say their question on one
               line, which takes a line off the row.
 
+              A quarter each on a wide sheet since 10 November 2026 (client,
+              "Merge cards, shared grid"), thirds still in between, and the
+              Yes/No pills no longer `grow` to fill the cell: two short answers
+              stretched across a third read as two wide empty bars. The notes
+              under 6, 7 and 8 were cut to one short line each.
+
               Each item is three rows of this grid — label, control, note —
               taken as a SUBGRID (`row-span-3 grid-rows-subgrid`). In a quarter
               items 7 and 8's labels wrap to two lines and item 6's does not,
@@ -12223,7 +12559,7 @@ export function ApplyWizard() {
               on each item is the gap to the next row of items.
             */}
             <div className="grid grid-cols-12 gap-x-5">
-              <div className="col-span-12 row-span-3 grid grid-rows-subgrid pb-4 @xl:col-span-4">
+              <div className="col-span-12 row-span-3 grid grid-rows-subgrid pb-4 @xl:col-span-4 @4xl:col-span-3">
                 <label className="row-span-2 grid grid-rows-subgrid">
                   <span>
                     <FieldLabel
@@ -12269,7 +12605,7 @@ export function ApplyWizard() {
                 */}
                 {applicationType !== 'new' && (
                   <p className="mt-1 text-xs text-ink-secondary">
-                    A renewal is assessed on last year’s gross sales instead.
+                    Renewals are taxed on last year’s gross sales.
                   </p>
                 )}
               </div>
@@ -12289,7 +12625,7 @@ export function ApplyWizard() {
                * answer the officer needs to see given, not an unticked box that
                * could equally mean the applicant skipped the question.
                */}
-              <div className="col-span-12 row-span-3 grid grid-rows-subgrid pb-4 @xl:col-span-4">
+              <div className="col-span-12 row-span-3 grid grid-rows-subgrid pb-4 @xl:col-span-4 @4xl:col-span-3">
                 <span>
                   <FieldLabel optional>7. Tax incentives from a Government Entity?</FieldLabel>
                 </span>
@@ -12317,7 +12653,7 @@ export function ApplyWizard() {
                         role="radio"
                         aria-checked={selected}
                         onClick={() => update('has_tax_incentives', opt.value)}
-                        className={`flex grow items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
+                        className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
                           selected
                             ? 'border-royal bg-input text-ink'
                             : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
@@ -12343,9 +12679,8 @@ export function ApplyWizard() {
                   at the slot instead of at the bin.
                 */}
                 {form.has_tax_incentives && (
-                  <p className="mt-2 text-xs text-ink-secondary">
-                    The paper asks for a copy of the certificate. A slot for it appears under
-                    Documentary Requirements.
+                  <p className="mt-1 text-xs text-ink-secondary">
+                    Upload the certificate under Documentary Requirements.
                   </p>
                 )}
               </div>
@@ -12372,7 +12707,7 @@ export function ApplyWizard() {
                * lessor, so the block stays closed until they say so rather
                * than showing four fields most applicants must leave blank.
                */}
-              <div className="col-span-12 row-span-3 grid grid-rows-subgrid pb-4 @xl:col-span-4">
+              <div className="col-span-12 row-span-3 grid grid-rows-subgrid pb-4 @xl:col-span-4 @4xl:col-span-3">
                 <span>
                   <FieldLabel optional>8. Do you pay rent for the premises?</FieldLabel>
                 </span>
@@ -12410,7 +12745,7 @@ export function ApplyWizard() {
                         role="radio"
                         aria-checked={selected}
                         onClick={() => update('is_rented', opt.rented)}
-                        className={`flex grow items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
+                        className={`flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
                           selected
                             ? 'border-royal bg-input text-ink'
                             : 'border-input-border bg-input/60 text-ink-secondary hover:bg-input'
@@ -12434,11 +12769,13 @@ export function ApplyWizard() {
                     and this one had none at all, so an applicant answering Yes
                     here was told nothing about the document it commits them to.
                     Shown only on Yes, because on No there is nothing to attach.
+                    Cut to one line, 10 November 2026 (it named "the paper" and
+                    "slots"; what matters is what to upload and where).
                   */}
                 {form.is_rented && (
-                  <p className="mt-2 max-w-[22rem] text-xs text-ink-secondary">
-                    The paper asks for a copy of your lease contract and your lessor&rsquo;s business
-                    permit. Slots for both appear under Documentary Requirements.
+                  <p className="mt-1 text-xs text-ink-secondary">
+                    Upload the lease contract and lessor&rsquo;s permit under Documentary
+                    Requirements.
                   </p>
                 )}
               </div>
@@ -12458,8 +12795,10 @@ export function ApplyWizard() {
             1 to 8 in sequence and items 5-8 are drawn above by this file. A
             single mount would wedge these between items 4 and 5, putting our
             own questions in the middle of the city's.
+
+            `mt-4`/`pt-5` (were 8 and 6): the compact pass, 10 November 2026.
           */}
-          <div className="mt-8 border-t border-line pt-6">
+          <div className="mt-4 border-t border-line pt-5">
             <FeeProfileStep
               scope="extras"
               applicationType={applicationType}
@@ -13424,7 +13763,16 @@ export function ApplyWizard() {
                               the label carries the wizard's required marker
                               while that holds, as every gated field does.
                             */}
-                            {row.field === 'address_pin' && amendChangesBarangay && (
+                            {/*
+                              Surname and Given Name likewise, once any part
+                              of a new owner is filled (client, 10 November
+                              2026).
+                            */}
+                            {((row.field === 'address_pin' && amendChangesBarangay) ||
+                              (row.field in AMEND_OWNER_REQUIRED &&
+                                AMEND_OWNER_PARTS.some(
+                                  (part) => (amendTyped[part] ?? '').trim() !== '',
+                                ))) && (
                               <>
                                 <span className="text-s-red" aria-hidden="true"> *</span>
                                 <span className="sr-only"> (required)</span>
@@ -13505,7 +13853,20 @@ export function ApplyWizard() {
                                 <span className="mt-2.5 w-[3.25rem] shrink-0 text-[10px] font-bold uppercase tracking-[0.08em] text-royal">
                                   New
                                 </span>
-                                <div className="min-w-0 flex-1">{renderAmendControl(row)}</div>
+                                <div className="relative min-w-0 flex-1">
+                                  {renderAmendControl(row)}
+                                  {/*
+                                    A new owner's Surname or Given Name left
+                                    blank. The form's own bubble, as every
+                                    field error here is (client, 24 September
+                                    2026), on the box that needs filling.
+                                  */}
+                                  {amendOwnerGaps(amendTyped).includes(row.field) && (
+                                    <FieldError id={`amend-${row.field}-error`}>
+                                      {AMEND_OWNER_REQUIRED[row.field].error}
+                                    </FieldError>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           ) : (
@@ -13809,10 +14170,28 @@ export function ApplyWizard() {
               <>
                 {amendRequested.length > 0 && (
                   <div className="mt-6 w-full max-w-lg rounded-lg border border-line bg-shell px-5 py-3">
-                    <h2 className="text-left text-[13px] font-bold uppercase tracking-wide text-ink">
-                      Changes requested
-                    </h2>
-                    <div className="mt-1">
+                    {/*
+                      Folds with "Collapse all" (client, 10 November 2026): one
+                      line, "Changes requested (9) · Show", until opened.
+                    */}
+                    <div className="flex flex-wrap items-baseline gap-x-2">
+                      <h2 className="text-left text-[13px] font-bold uppercase tracking-wide text-ink">
+                        Changes requested{' '}
+                        <span className="tnum font-normal normal-case text-ink-secondary">
+                          ({amendRequested.length})
+                        </span>
+                      </h2>
+                      <span aria-hidden="true" className="text-ink-muted">
+                        &middot;
+                      </span>
+                      <ReviewFoldToggle
+                        open={sectionOpen.changes}
+                        onToggle={() => toggleSection('changes')}
+                        controls="review-changes-list"
+                        what="changes requested"
+                      />
+                    </div>
+                    <div id="review-changes-list" className="mt-1" hidden={!sectionOpen.changes}>
                       <RequestedChanges amendRows={amendRequested} />
                     </div>
                   </div>
@@ -13846,10 +14225,31 @@ export function ApplyWizard() {
               </p>
             ) : (
             <div className="mt-8 rounded-lg border border-royal/30 bg-royal-tint px-5 py-3">
+              {/*
+                Folds with "Collapse all" (client, 10 November 2026): the
+                heading, its line count and Show stay; the rest is hidden.
+              */}
               <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className="text-[13px] font-bold uppercase tracking-wide text-royal">
-                  Estimated fees so far
-                </h2>
+                <div className="flex flex-wrap items-baseline gap-x-2">
+                  <h2 className="text-[13px] font-bold uppercase tracking-wide text-royal">
+                    Estimated fees so far
+                    {feeEstimate !== null && !feeEstimateFailed && (
+                      <span className="tnum font-normal normal-case text-ink-secondary">
+                        {' '}
+                        ({(feeEstimate.line_items ?? []).length})
+                      </span>
+                    )}
+                  </h2>
+                  <span aria-hidden="true" className="text-ink-muted">
+                    &middot;
+                  </span>
+                  <ReviewFoldToggle
+                    open={sectionOpen.fees}
+                    onToggle={() => toggleSection('fees')}
+                    controls="review-fee-estimate"
+                    what="estimated fees"
+                  />
+                </div>
                 {feeEstimateBusy && (
                   <span aria-live="polite" className="text-xs text-ink-secondary">
                     Working it out&hellip;
@@ -13857,6 +14257,7 @@ export function ApplyWizard() {
                 )}
               </div>
 
+              <div id="review-fee-estimate" hidden={!sectionOpen.fees}>
               {feeEstimateFailed ? (
                 <p className="mt-3 text-sm text-ink-secondary">
                   We could not work out an estimate just now. It does not affect your application
@@ -13908,6 +14309,7 @@ export function ApplyWizard() {
                 An estimate from your own answers. BPLO assesses the actual amount and issues
                 your Tax Order of Payment after it approves this form.
               </p>
+              </div>
             </div>
             )}
             {/*

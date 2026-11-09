@@ -16,6 +16,7 @@ use App\Models\User;
 use App\Support\OfficerEditRules;
 use App\Support\SanitaryPrefill;
 use App\Support\SheetRequirements;
+use Illuminate\Support\Collection;
 
 /*
  * Per-office forms: the sheet never asks for what the system already knows
@@ -622,68 +623,137 @@ it('stops the applicant editing an office form once its own clearance has been s
 });
 
 /*
- * ── The owner's address, from the account ───────────────────────────────────
+ * ── The owner's address, from the account, locked ──────────────────────────
  *
- * Client, 5 October 2026: *"Check the business permit application if there is
- * no owner's address to derive from … If none, derive this from the user's
- * address, but still editable."* The business permit holds none, so the sheet
- * is OFFERED the account's home address on the `prefill` channel — never
- * written into `form_data` — and `prefill_from` says it came from the account.
+ * Client, 5 October 2026: the business permit holds no owner's address, so it
+ * came from the account's home address — OFFERED on the `prefill` channel and
+ * left editable. Client, 10 November 2026 ("ask once, lock everywhere"): the
+ * CPDD, CENRO and OBO sheets show it read-only, OBO's ZIP Code with it, so it
+ * is a derived answer now and a posted value is replaced. An account without
+ * one leaves the boxes to type.
  */
-it('offers the account’s home address to the sheets that ask the owner’s address', function () {
-    User::where('email', 'owner@biztrack.local')->update(homeAddress());
-    $app = officeFormApp(['OCCUPANCY', 'CEC', 'FSIC']);
 
-    $forms = collect(
-        $this->withHeaders(authAs('owner@biztrack.local'))
+/** The sheets as the owner reads them, keyed by permit type. */
+function ownerSheets(Application $app): Collection
+{
+    return collect(
+        test()->withHeaders(authAs('owner@biztrack.local'))
             ->getJson("/api/v1/applications/{$app->id}/office-forms")
             ->assertOk()
             ->json('data')
     )->keyBy('permit_type_code');
+}
 
-    expect($forms['OCCUPANCY']['prefill']['owner_address'])->toBe('12 Gen. Luna St., Longos, Malabon, Metro Manila 1472')
-        ->and($forms['OCCUPANCY']['prefill_from']['owner_address'])->toBe('account')
-        ->and($forms['CEC']['prefill']['owner_address'])->toBe('12 Gen. Luna St., Longos, Malabon, Metro Manila 1472')
-        // Offered, not applied: the stored sheet does not have it until the applicant saves.
-        ->and($forms['OCCUPANCY']['form_data'])->not->toHaveKey('owner_address')
-        // The BFP sheet prints no box for it.
-        ->and((array) ($forms['FSIC']['prefill'] ?? []))->not->toHaveKey('owner_address');
+it('locks the owner’s home address from the account on the CPDD, CENRO and OBO sheets', function () {
+    User::where('email', 'owner@biztrack.local')->update(homeAddress());
+    $app = officeFormApp(['ZONING', 'CEC', 'OCCUPANCY', 'FSIC']);
+    $owner = authAs('owner@biztrack.local');
+
+    foreach ([
+        'ZONING' => ['zoning_home_address' => '7 Somewhere Else, Tonsuya'],
+        'CEC' => ['owner_address' => '7 Somewhere Else, Tonsuya'],
+        'OCCUPANCY' => ['owner_address' => '7 Somewhere Else, Tonsuya', 'owner_zip' => '1470'],
+    ] as $code => $posted) {
+        $this->withHeaders($owner)
+            ->putJson("/api/v1/applications/{$app->id}/office-forms/{$code}", ['form_data' => $posted])
+            ->assertOk();
+    }
+
+    $full = '12 Gen. Luna St., Longos, Malabon, Metro Manila 1472';
+    expect(savedForm($app, 'ZONING')['zoning_home_address'])->toBe($full)
+        ->and(savedForm($app, 'CEC')['owner_address'])->toBe($full)
+        // OBO prints the ZIP Code in a box of its own, so the line leaves it off.
+        ->and(savedForm($app, 'OCCUPANCY')['owner_address'])->toBe('12 Gen. Luna St., Longos, Malabon, Metro Manila')
+        ->and(savedForm($app, 'OCCUPANCY')['owner_zip'])->toBe('1472');
+
+    $forms = ownerSheets($app);
+    expect(explode(',', $forms['ZONING']['form_data']['locked_answers']))->toContain('zoning_home_address')
+        ->and(explode(',', $forms['CEC']['form_data']['locked_answers']))->toContain('owner_address')
+        ->and(explode(',', $forms['OCCUPANCY']['form_data']['locked_answers']))->toContain('owner_address', 'owner_zip')
+        // Derived, so no longer offered as a suggestion.
+        ->and((array) ($forms['OCCUPANCY']['prefill'] ?? []))->not->toHaveKey('owner_address')
+        // The BFP paper prints no box for it.
+        ->and($forms['FSIC']['form_data'])->not->toHaveKey('owner_address');
 });
 
-it('stops offering the address once the applicant has written one', function () {
-    User::where('email', 'owner@biztrack.local')->update(homeAddress());
-    $app = officeFormApp(['OCCUPANCY']);
+it('leaves the owner’s address to type when the account has none', function () {
+    User::where('email', 'owner@biztrack.local')->update(array_map(fn () => null, homeAddress()));
+    $app = officeFormApp(['CEC', 'OCCUPANCY']);
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->putJson("/api/v1/applications/{$app->id}/office-forms/OCCUPANCY", [
+            'form_data' => ['owner_address' => '7 Somewhere Else, Tonsuya', 'owner_zip' => '1470'],
+        ])
+        ->assertOk()
+        ->assertJsonPath('data.form_data.owner_address', '7 Somewhere Else, Tonsuya')
+        ->assertJsonPath('data.form_data.owner_zip', '1470');
+
+    $forms = ownerSheets($app);
+    expect(explode(',', $forms['OCCUPANCY']['form_data']['locked_answers']))->not->toContain('owner_address', 'owner_zip')
+        ->and($forms['CEC']['form_data']['locked_answers'])->toBe('')
+        ->and($forms['CEC']['form_data'])->not->toHaveKey('owner_address')
+        ->and((array) ($forms['CEC']['prefill'] ?? []))->not->toHaveKey('owner_address');
+});
+
+/*
+ * ── No. of Storeys: asked once, on Business Operation ──────────────────────
+ *
+ * Client, 10 November 2026 ("ask once, lock everywhere"): the wizard asks it,
+ * required, into `fee_profile.storeys`, and the CPDD, BFP and OBO sheets show
+ * that answer read-only. Where the application holds none — an older filing,
+ * an amendment — the sheet keeps its own box and its own answer.
+ */
+it('locks the storey count from Business Operation on the CPDD, BFP and OBO sheets', function () {
+    $app = officeFormApp(['ZONING', 'FSIC', 'OCCUPANCY']);
+    $app->update(['fee_profile' => ['storeys' => 3]]);
+    $owner = authAs('owner@biztrack.local');
+
+    foreach (['ZONING', 'FSIC', 'OCCUPANCY'] as $code) {
+        $this->withHeaders($owner)
+            ->putJson("/api/v1/applications/{$app->id}/office-forms/{$code}", [
+                'form_data' => ['building_storeys' => '9'],
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.form_data.building_storeys', '3');
+
+        expect(savedForm($app, $code)['building_storeys'])->toBe('3')
+            ->and(explode(',', savedForm($app, $code)['locked_answers']))->toContain('building_storeys');
+    }
+});
+
+it('leaves the storey count to type when the application holds none', function () {
+    $app = officeFormApp(['ZONING', 'FSIC']);
+    $app->update(['fee_profile' => ['floor_area_sqm' => 40]]);
+    // An older filing: the sheet was saved while the wizard did not ask.
     ApplicationOfficeForm::create([
         'application_id' => $app->id,
-        'permit_type_id' => PermitType::where('code', 'OCCUPANCY')->value('id'),
-        'form_data' => ['owner_address' => '7 Somewhere Else, Tonsuya, Malabon'],
+        'permit_type_id' => PermitType::where('code', 'ZONING')->value('id'),
+        'form_data' => ['building_storeys' => '4'],
     ]);
 
-    $form = collect(
-        $this->withHeaders(authAs('owner@biztrack.local'))
-            ->getJson("/api/v1/applications/{$app->id}/office-forms")
-            ->assertOk()
-            ->json('data')
-    )->firstWhere('permit_type_code', 'OCCUPANCY');
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->putJson("/api/v1/applications/{$app->id}/office-forms/FSIC", [
+            'form_data' => ['building_storeys' => '2'],
+        ])
+        ->assertOk()
+        ->assertJsonPath('data.form_data.building_storeys', '2');
 
-    expect((array) ($form['prefill'] ?? []))->not->toHaveKey('owner_address')
-        ->and($form['form_data']['owner_address'])->toBe('7 Somewhere Else, Tonsuya, Malabon');
+    $forms = ownerSheets($app);
+    expect($forms['ZONING']['form_data']['building_storeys'])->toBe('4')
+        ->and(explode(',', $forms['ZONING']['form_data']['locked_answers']))->not->toContain('building_storeys')
+        ->and(explode(',', $forms['FSIC']['form_data']['locked_answers']))->not->toContain('building_storeys');
 });
 
-it('offers nothing when the account has no home address', function () {
-    User::where('email', 'owner@biztrack.local')->update([
-        'home_street' => null, 'home_barangay' => null, 'home_city' => null, 'home_province' => null,
-    ]);
-    $app = officeFormApp(['OCCUPANCY']);
+it('leaves an amendment’s storey count to its sheet, as every carried answer is', function () {
+    $app = officeFormApp(['OCCUPANCY'], ApplicationType::Amendment);
+    $app->update(['fee_profile' => ['storeys' => 3]]);
 
-    $form = collect(
-        $this->withHeaders(authAs('owner@biztrack.local'))
-            ->getJson("/api/v1/applications/{$app->id}/office-forms")
-            ->assertOk()
-            ->json('data')
-    )->firstWhere('permit_type_code', 'OCCUPANCY');
-
-    expect((array) ($form['prefill'] ?? []))->not->toHaveKey('owner_address');
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->putJson("/api/v1/applications/{$app->id}/office-forms/OCCUPANCY", [
+            'form_data' => ['building_storeys' => '5'],
+        ])
+        ->assertOk()
+        ->assertJsonPath('data.form_data.building_storeys', '5');
 });
 
 /*
@@ -763,4 +833,33 @@ it('refuses a future pest-control date and a negative toilet count on the Sanita
         ])
         ->assertStatus(422)
         ->assertJsonValidationErrors(['form_data.pest_control_last_date', 'form_data.toilets_count']);
+});
+
+it('lets OBO record the Others document with no reason, ticking Others, even over a stale Documents Submitted', function () {
+    /*
+     * Client, 10 November 2026: "Other Document (specify)" is the office's
+     * entry, and Documents Submitted is ticked from the uploads. A sheet saved
+     * before that carries a typed list; a dates-only save must not read that
+     * stale copy as a locked correction.
+     */
+    $app = oboSheetHeldBy(User::where('email', 'obo@biztrack.local')->firstOrFail());
+    ApplicationOfficeForm::where('application_id', $app->id)->update(['form_data' => [
+        'building_permit_no' => 'BP-001',
+        'completion_documents' => 'Certificate of Completion, As-built Plans/Specifications',
+    ]]);
+
+    $this->withHeaders(authAs('obo@biztrack.local'))
+        ->putJson("/api/v1/applications/{$app->id}/office-forms/OCCUPANCY", [
+            'form_data' => ['completion_other_document' => 'Soil boring test', 'fsec_date' => '2026-01-06'],
+        ])
+        ->assertOk()
+        ->assertJsonPath('data.form_data.completion_other_document', 'Soil boring test')
+        ->assertJsonPath('data.form_data.completion_documents', 'Others');
+
+    // The owner's save keeps it off, the way it keeps the dates off.
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->putJson("/api/v1/applications/{$app->id}/office-forms/OCCUPANCY", [
+            'form_data' => ['building_permit_no' => 'BP-001', 'completion_other_document' => 'Mine'],
+        ]);
+    expect(savedForm($app, 'OCCUPANCY')['completion_other_document'])->toBe('Soil boring test');
 });

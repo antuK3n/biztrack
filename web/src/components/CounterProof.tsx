@@ -223,16 +223,21 @@ const EMPTY: OrFieldValues = { orNumber: '', orDate: '', photo: null }
  *
  * The OR number with the date paid, the photo, or both; the server says so
  * when neither is there. Sending marks nothing paid — BPLO does that — so what
- * comes back is the sentence that says who acts next, and what was sent. The
- * form stays below it: until BPLO confirms, the owner may send again and the
- * newest proof replaces the pending one.
+ * comes back is the sentence that says who acts next, and what was sent.
+ *
+ * One receipt waits for BPLO at a time (client, 10 November 2026): while one
+ * is pending the form is gone and only "Receipt sent — waiting for BPLO" and
+ * what was sent are shown. Until then the form stayed open and every send
+ * replaced the pending proof and told BPLO again, which let an owner spam the
+ * bell. The server refuses a second send too; if a stale tab hits that
+ * refusal, the pending proof is read back so the form closes there as well.
  *
  * BPLO may reject the receipt instead, with a reason (Ken, 3 November 2026).
- * Then the box above the form is red and says so, with the reason, and what
- * was sent; a new send replaces it with the green one. Which of the two is
- * drawn is `latest`, the owner's newest proof (`paymentProofs.latest`), read
- * by the Pay page — which also opens on Over the Counter when there is one,
- * so a rejected receipt is not hidden behind an unchosen method.
+ * Then the box is red and says so, with the reason and what was sent, and the
+ * form is back below it for a new one. Which is drawn is `latest`, the
+ * owner's newest proof (`paymentProofs.latest`), read by the Pay page — which
+ * also opens on Over the Counter when there is one, so a rejected receipt is
+ * not hidden behind an unchosen method.
  */
 export function SendProofForm({
   applicationId,
@@ -262,11 +267,21 @@ export function SendProofForm({
       setValues(EMPTY)
       setResetKey((k) => k + 1)
     } catch (err) {
+      // Refused because one is already pending (sent from another tab): show that one instead.
+      if (toApiError(err).errors?.proof) {
+        const pending = await paymentProofs.latest(applicationId).catch(() => null)
+        if (pending && !pending.rejected_at) {
+          onSent(pending)
+          return
+        }
+      }
       setErrors(refusalSentences(err))
     } finally {
       setSending(false)
     }
   }
+
+  const pending = Boolean(latest && !latest.rejected_at)
 
   return (
     <div className="mt-6 space-y-4">
@@ -281,33 +296,36 @@ export function SendProofForm({
           </ProtoCard>
         ) : (
           <ProtoCard className="space-y-3 px-7 py-5">
-            <Alert variant="success">Proof sent. BPLO will confirm your payment.</Alert>
+            <Alert variant="success">Receipt sent — waiting for BPLO</Alert>
             <ProofDetails proof={latest} />
           </ProtoCard>
         ))}
 
-      <ProtoCard className="space-y-5 px-7 py-6">
-        <OrFields values={values} onChange={setValues} resetKey={resetKey} />
+      {/* One receipt waits for BPLO at a time (client, 10 November 2026): no form while one does. */}
+      {!pending && (
+        <ProtoCard className="space-y-5 px-7 py-6">
+          <OrFields values={values} onChange={setValues} resetKey={resetKey} />
 
-        {errors.length > 0 && (
-          <Alert variant="error">
-            {errors.map((sentence) => (
-              <span key={sentence} className="block">
-                {sentence}
-              </span>
-            ))}
-          </Alert>
-        )}
+          {errors.length > 0 && (
+            <Alert variant="error">
+              {errors.map((sentence) => (
+                <span key={sentence} className="block">
+                  {sentence}
+                </span>
+              ))}
+            </Alert>
+          )}
 
-        {/* aria-disabled, never `disabled` (AGENTS.md §6.2); the press is refused in `send`. */}
-        <PillButton
-          onClick={() => void send()}
-          aria-disabled={sending || undefined}
-          className="w-full py-3 text-base aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
-        >
-          Send proof of payment
-        </PillButton>
-      </ProtoCard>
+          {/* aria-disabled, never `disabled` (AGENTS.md §6.2); the press is refused in `send`. */}
+          <PillButton
+            onClick={() => void send()}
+            aria-disabled={sending || undefined}
+            className="w-full py-3 text-base aria-disabled:cursor-not-allowed aria-disabled:opacity-60"
+          >
+            Send proof of payment
+          </PillButton>
+        </ProtoCard>
+      )}
     </div>
   )
 }

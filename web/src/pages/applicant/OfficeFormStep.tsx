@@ -11,8 +11,15 @@ import {
   formGridCls,
   inputCls,
 } from '../../components/ui/Proto'
-import { genderLabel } from '../../lib/fieldRules'
+import { genderLabel, phoneValid } from '../../lib/fieldRules'
 import { formatBytes, formatDate } from '../../lib/format'
+import {
+  formatCountInput,
+  formatDecimalInput,
+  formatDigitsInput,
+  formatPhoneInput,
+  stripDigits,
+} from '../../lib/numberInput'
 import type { CarriedSource, OfficeFormRequirement } from '../../lib/types'
 import { ACCEPT_ATTR, ACCEPTED_FILES_NOTE, useUploadConverting } from './uploads'
 
@@ -218,11 +225,16 @@ export type OfficeFormCode = (typeof OFFICE_FORM_CODES)[number]
  * table matched ('scale' or 'catch_all'), and CENRO's review grid printed it
  * as "Denr Reason: catch_all" (tester). `denr_basis` beside it already names
  * the row in words; the CEC sheet still reads the reason to pick its sentence.
+ *
+ * `locked_answers` joined on 10 November 2026: the keys this read took from
+ * the Business Permit application or the account, which the sheet shows
+ * read-only (OfficeFormAnswers::derive). See `isLocked`.
  */
 export const OFFICE_FORM_INTERNAL_KEYS: readonly string[] = [
   'authorized_representative_source',
   'occupancy_shared_source',
   'denr_reason',
+  'locked_answers',
 ]
 
 /**
@@ -267,8 +279,8 @@ export const OFFICE_FORM_FIELD_LABELS: Record<string, string> = {
   'OCCUPANCY.completion_date': 'Date of Completion',
   'OCCUPANCY.completion_documents': 'Documents Submitted',
   'OCCUPANCY.completion_other_document': 'Other Document (specify)',
-  'OCCUPANCY.completion_submitted_by': 'Certificate of Completion — Submitted By',
-  'OCCUPANCY.completion_professional': 'Submitted By — Profession / Licence',
+  'OCCUPANCY.completion_submitted_by': 'Engineer / architect who signed your Certificate of Completion',
+  'OCCUPANCY.completion_professional': 'Profession',
 
   /* CPDD · MCG-CPDD-FO-003 */
   'ZONING.application_type': 'Nature of Application',
@@ -398,17 +410,22 @@ export const OFFICE_FORM_FIELD_ORDER: Record<OfficeFormCode, readonly string[]> 
   ],
 }
 
-/**
- * What the Certificate of Occupancy's left page ticks as submitted (NBC Form
- * B-13). Stored on the sheet as a comma-joined list in this spelling; the
- * certificate ticks by the same words.
+/*
+ * COMPLETION_DOCUMENTS — the four "Documents Submitted" boxes of NBC Form
+ * B-13 — went on 10 November 2026 (client): the API ticks them from the
+ * sheet's uploads (OfficeFormAnswers::COMPLETION_DOCUMENTS) and "Others" is
+ * OBO's entry on its review screen. Bring the list back only if the owner is
+ * to tick them again.
  */
-export const COMPLETION_DOCUMENTS = [
-  'Certificate of Completion',
-  'As-built Plans/Specifications',
-  'Daily Construction Works Logbook',
-  'Others',
-] as const
+
+/**
+ * Who signed the Certificate of Completion: the two professions NBC Form
+ * B-13 prints, "a duly licensed ARCHITECT OR CIVIL ENGINEER" (client,
+ * 10 November 2026). A free box took "Engr.", "CE" and licence numbers.
+ * The server's rule for `completion_professional` (OfficeFormRules) must
+ * accept exactly these two.
+ */
+export const COMPLETION_PROFESSIONS = ['Civil Engineer', 'Architect']
 
 /**
  * Sort a sheet's answers into the order its paper asks them.
@@ -837,6 +854,58 @@ export function todayISO(): string {
 }
 
 /**
+ * ── The sheets' number-shaped answers (client, 10 November 2026) ──────────
+ *
+ * Each box below set `inputMode` and nothing else, so a phone showed a keypad
+ * and a desktop keyboard still typed "two" into No. of Toilets. Each now
+ * drops what cannot belong as it is typed (`format`), and the sheet's own
+ * check refuses what is left out of range (`valid`) — a ZIP of three digits,
+ * zero storeys.
+ *
+ * Mirrors App\Support\OfficeFormRules, which refuses the same values on
+ * save; change the two together. Keyed `CODE.key` like
+ * OFFICE_FORM_FIELD_LABELS, because `building_storeys` is on three papers.
+ */
+const wholeNumber = (min: number, max: number) => ({
+  format: formatCountInput,
+  valid: (v: string) => /^\d+$/.test(v) && Number(v) >= min && Number(v) <= max,
+})
+const storeys = wholeNumber(1, 200)
+const SHEET_NUMBER_ANSWERS: Record<string, { format: (raw: string) => string; valid: (v: string) => boolean }> = {
+  'SANITARY.toilets_count': wholeNumber(0, 1000),
+  'SANITARY.seating_capacity': wholeNumber(0, 100_000),
+  'ZONING.building_storeys': storeys,
+  'FSIC.building_storeys': storeys,
+  'OCCUPANCY.building_storeys': storeys,
+  'OCCUPANCY.building_units': wholeNumber(1, 100_000),
+  'OCCUPANCY.total_floor_area_sqm': {
+    format: formatDecimalInput,
+    valid: (v) => /^\d*\.?\d+$/.test(v) && Number(v) > 0 && Number(v) <= 10_000_000,
+  },
+  'OCCUPANCY.owner_zip': { format: (v) => formatDigitsInput(v, 4), valid: (v) => /^\d{4}$/.test(v) },
+  'OCCUPANCY.owner_tel': { format: formatPhoneInput, valid: phoneValid },
+  'OCCUPANCY.owner_ctc_no': { format: (v) => formatDigitsInput(v, 20), valid: (v) => /^\d{1,20}$/.test(v) },
+}
+
+/** What a keystroke into a sheet's number box leaves; other boxes pass it through. */
+function sheetInput(code: string, key: string, raw: string): string {
+  return SHEET_NUMBER_ANSWERS[`${code}.${key}`]?.format(raw) ?? raw
+}
+
+/** "A valid No. of Toilets", for each answered number-shaped box out of shape. */
+function sheetInvalidAnswers(code: OfficeFormCode, data: OfficeFormData): string[] {
+  return Object.entries(SHEET_NUMBER_ANSWERS)
+    .filter(([codeKey]) => codeKey.startsWith(`${code}.`))
+    .map(([codeKey, rule]) => {
+      const key = codeKey.slice(code.length + 1)
+      const value = String(data[key] ?? '').trim()
+
+      return value !== '' && !rule.valid(value) ? `A valid ${officeFormFieldLabel(code, key)}` : null
+    })
+    .filter((label): label is string => label !== null)
+}
+
+/**
  * Required-field check per office form. Returns the labels still missing (or
  * invalid) so the wizard can disable Next and list what is left. Counts and
  * reference numbers stay optional — save those a certificate prints and
@@ -849,10 +918,19 @@ export function officeFormMissing(code: OfficeFormCode, data: OfficeFormData): s
   // Derived answers (type of application, filing date, certificate applied for)
   // are never required here: the API fills them in, so they cannot be missing.
   //
-  // ZONING requires nothing. It used to require Proposed Land Use, which the
+  // ZONING required nothing. It used to require Proposed Land Use, which the
   // real CPDD form (MCG-CPDD-FO-003) turns out not to ask; of the two questions
   // it does ask, the paper marks neither mandatory, and inventing a requirement
   // the counter does not enforce is the same mistake in the other direction.
+  //
+  // The storey count is required on all three sheets that print it since 10
+  // November 2026 (client: "ask once, lock everywhere"): Business Operation
+  // requires it and these sheets show that answer, so on a current filing it
+  // is never missing. Only a filing whose application holds none (an older
+  // one, an amendment) is asked for it here, alike on every sheet.
+  if (code === 'ZONING') {
+    if (!has('building_storeys')) missing.push('No. of Storey of Building')
+  }
   if (code === 'SANITARY') {
     /*
      * The four facilities PD 856 has the health officer look at on every
@@ -873,12 +951,13 @@ export function officeFormMissing(code: OfficeFormCode, data: OfficeFormData): s
      * Two required answers, and CEC becomes a blocking sheet because of them —
      * `officeFormCanBlock('CEC')` was false and is now true.
      *
-     * Both are on the paper above the REMARKS rule, and neither can be derived.
-     * The address is the one field on MCG-CENRO-FO-001 the register does not
-     * hold anywhere (there is no residential address on a business), and the
-     * certification is an act rather than a fact — a sheet submitted without it
-     * is one the office would hand back, so the applicant should be stopped
-     * here rather than there.
+     * Both are on the paper above the REMARKS rule. The address is the one
+     * field on MCG-CENRO-FO-001 the business record does not hold, so it comes
+     * from the account's home address (locked since 10 November 2026) and is
+     * typed only where the account has none; the certification is an act
+     * rather than a fact — a sheet submitted without it is one the office
+     * would hand back, so the applicant should be stopped here rather than
+     * there.
      *
      * The birthday stays optional, as it was: the paper prints the box but the
      * counter accepts the form without it, and inventing a requirement the
@@ -889,11 +968,11 @@ export function officeFormMissing(code: OfficeFormCode, data: OfficeFormData): s
   }
   if (code === 'FSIC') {
     /*
-     * The two the BFP header asks and nothing else answers. Occupancy type
-     * and storeys are asked on the OBO sheet when that permit is on the
-     * filing and derived onto this one, so they are checked through the
-     * DERIVED payload rather than the typed one — `has` reads what the sheet
-     * holds, which is the same thing either way.
+     * The two the BFP header asks. Both come from the Business Permit
+     * application, read-only — the line of business and Business
+     * Operation's storey count — so they are checked through the DERIVED
+     * payload, which `has` reads: missing only where the application holds
+     * no answer and the box is the applicant's to fill.
      */
     if (!has('occupancy_type')) missing.push('Type of Occupancy / Business Nature')
     if (!has('building_storeys')) missing.push('No. of Storeys')
@@ -917,21 +996,25 @@ export function officeFormMissing(code: OfficeFormCode, data: OfficeFormData): s
      * the API refuses a passed OBO visit until it has.
      */
     if (!has('building_permit_no')) missing.push('Building Permit No.')
-    const documents = has('completion_documents')
-      ? (data.completion_documents as string)
-          .split(',')
-          .map((d) => d.trim())
-          .filter(Boolean)
-      : []
-    if (documents.length === 0) missing.push('Documents Submitted')
-    if (documents.includes('Others') && !has('completion_other_document')) missing.push('Other Document (specify)')
-    if (!has('completion_submitted_by')) missing.push('Certificate of Completion — Submitted By')
-    if (!has('completion_professional')) missing.push('Profession / Licence')
+    /*
+     * Documents Submitted and "Others" are not the owner's since 10 November
+     * 2026 (client): the API ticks the first from the uploads, and OBO
+     * records the second. The checklist's own required rows already stop
+     * a sheet without the Certificate of Completion.
+     */
+    if (!has('completion_submitted_by')) missing.push('Engineer / architect who signed')
+    // One of the two chips; an older free-typed answer is asked again.
+    if (!COMPLETION_PROFESSIONS.includes(String(data.completion_professional ?? '')))
+      missing.push('Profession')
   }
   // The MARKET branch was here (name of market, stall no., an optional stall
   // count the fee engine read). Removed with the Market Clearance on
   // 6 September 2026 — see OFFICE_FORM_META.
-  return missing
+  //
+  // An answer given but out of shape is not an answer (10 November 2026): a
+  // required count of "0" storeys, or an optional ZIP of three digits, holds
+  // the sheet as surely as a blank required box — the API refuses both.
+  return [...missing, ...sheetInvalidAnswers(code, data)]
 }
 
 /* ── Shared field primitives (prototype chip pills, read-only control no.) ── */
@@ -1046,6 +1129,7 @@ function correctionControl(key: string): CorrectionControl | undefined {
     'SANITARY.pest_control_last_date': { kind: 'date' },
     'OCCUPANCY.application_type': { kind: 'chips', options: OCCUPANCY_SCOPES },
     'OCCUPANCY.completion_date': { kind: 'date' },
+    'OCCUPANCY.completion_professional': { kind: 'chips', options: COMPLETION_PROFESSIONS },
     'OCCUPANCY.building_storeys': { kind: 'numeric' },
     'OCCUPANCY.building_units': { kind: 'numeric' },
     'OCCUPANCY.owner_zip': { kind: 'numeric' },
@@ -1120,9 +1204,16 @@ export function CorrectionAnswer({
   return (
     <input
       type={control?.kind === 'date' ? 'date' : 'text'}
-      inputMode={control?.kind === 'numeric' ? 'numeric' : undefined}
+      inputMode={
+        control?.kind !== 'numeric' ? undefined : field === 'total_floor_area_sqm' ? 'decimal' : 'numeric'
+      }
+      // The sheet's own rules, so a correction cannot type what the sheet
+      // would not take (10 November 2026): digits only, no future date, the
+      // API's length cap.
+      max={control?.kind === 'date' ? todayISO() : undefined}
+      maxLength={control?.kind === 'date' ? undefined : field === 'zoning_project_description' ? 1000 : 255}
       value={value}
-      onChange={(e) => onChange(e.target.value)}
+      onChange={(e) => onChange(sheetInput(code, field, e.target.value))}
       aria-label={`Correct ${label}`}
       className={box}
     />
@@ -1246,24 +1337,32 @@ const AutoTag = () => <span className="font-normal text-ink-muted"> (auto-genera
  * business's own value (an amendment's requested one). Left as `children`,
  * the editable box, only where the business never gave an answer, so a
  * required box can still be filled.
+ *
+ * `strict` (10 November 2026, the storey count): locked only when the API
+ * says it derived the answer (`isLocked`). An older filing's sheet can hold
+ * a count the applicant typed while the wizard did not ask; that arrives
+ * filled too, and is still theirs to change.
  */
 function PermitAnswer({
   field,
   label,
   data,
   className,
+  strict,
   children,
 }: {
   field: string
   label: string
   data: OfficeFormData
   className?: string
+  strict?: boolean
   children: ReactNode
 }) {
   const value = get(data, field)
   const [arrived] = useState(() => value.trim() !== '')
   const carried = useContext(CarriedContext)[field] === 'business'
-  if (!(value.trim() !== '' && (arrived || carried))) return <>{children}</>
+  const locked = strict ? isLocked(data, field) : arrived || carried
+  if (!(value.trim() !== '' && locked)) return <>{children}</>
 
   return (
     <DerivedField
@@ -1282,6 +1381,39 @@ function PermitAnswer({
 const FromApplicationTag = () => (
   <span className="font-normal text-ink-muted"> (from your application)</span>
 )
+
+/**
+ * Did the API take this answer from the Business Permit application or the
+ * account? `locked_answers` names the keys it did, on this read
+ * (OfficeFormAnswers::derive); a key it names always holds that value.
+ */
+function isLocked(data: OfficeFormData, field: string): boolean {
+  return get(data, 'locked_answers').split(',').includes(field)
+}
+
+/**
+ * The owner's home address (and OBO's ZIP Code), from the account, read-only
+ * (client, 10 November 2026: "ask once, lock everywhere"). Where the account
+ * holds none the API derives nothing and `children`, the editable box, stays.
+ */
+function AccountAnswer({
+  field,
+  label,
+  data,
+  className,
+  children,
+}: {
+  field: string
+  label: string
+  data: OfficeFormData
+  className?: string
+  children: ReactNode
+}) {
+  const value = get(data, field)
+  if (!(value.trim() !== '' && isLocked(data, field))) return <>{children}</>
+
+  return <DerivedField className={className} label={label} value={value} hint="Change it on your profile." />
+}
 
 /**
  * An answer the system already holds, shown read-only. The API derives it from
@@ -1624,28 +1756,30 @@ function ZoningFields({
           />
 
         {/*
-          II. HOME ADDRESS — an input, because nothing on the filing answers it.
-          `business_addresses` carries an `address_type` column that has only
-          ever held `business_location`, so the proprietor's residence has no
-          home on the BPLO form. CENRO's sheet asks the same question under a
-          different name; if BPLO ever grows the field, both become carried.
+          II. HOME ADDRESS — from the account, read-only (client, 10 November
+          2026: "ask once, lock everywhere"), as CENRO's and OBO's owner
+          address are. Nothing on the filing answers it — `business_addresses`
+          has only ever held the business location — so it is the home
+          address the owner gave at registration (AccountPrefill).
 
-          No asterisk since 5 October 2026. It wore one while
-          `officeFormMissing` accepted it blank — the paper (MCG-CPDD-FO-003)
-          does not mark it mandatory, so the gate was right and the mark was
-          the lie (tester).
+          An account without one leaves the box editable, and optional: the
+          paper (MCG-CPDD-FO-003) does not mark it mandatory (tester, 5
+          October 2026).
         */}
-        <label className={formCell.half}>
-          <FieldLabel optional>Home Address</FieldLabel>
-          <input
-            value={get(data, 'zoning_home_address')}
-            onChange={(e) => set('zoning_home_address', e.target.value)}
-            readOnly={ro}
-            placeholder="No. of Street, Barangay, Municipality/City, Province"
-            className={inputCls}
-          />
-          <CarriedTag field="zoning_home_address" />
-        </label>
+        <AccountAnswer field="zoning_home_address" label="Home Address" data={data} className={formCell.half}>
+          <label className={formCell.half}>
+            <FieldLabel optional>Home Address</FieldLabel>
+            <input
+              value={get(data, 'zoning_home_address')}
+              onChange={(e) => set('zoning_home_address', e.target.value)}
+              maxLength={255}
+              readOnly={ro}
+              placeholder="No. of Street, Barangay, Municipality/City, Province"
+              className={inputCls}
+            />
+            <CarriedTag field="zoning_home_address" />
+          </label>
+        </AccountAnswer>
 
         {/* III. NAME OF FIRM · CONTACT NO.  |  IV. ADDRESS OF FIRM */}
           <DerivedField
@@ -1705,6 +1839,7 @@ function ZoningFields({
             rows={3}
             value={get(data, 'zoning_project_description')}
             onChange={(e) => set('zoning_project_description', e.target.value)}
+            maxLength={1000}
             readOnly={ro}
             placeholder="e.g. Two-storey coffee shop with a small roasting area at the rear"
             className={inputCls}
@@ -1719,32 +1854,29 @@ function ZoningFields({
             hint="Square metres, from your Business Operation answers."
           />
           {/*
-            VIII.B — asked here now, not carried.
+            VIII.B — carried again, read-only (client, 10 November 2026: "ask
+            once, lock everywhere").
 
-            It was derived from `fee_profile.storeys`, which the BPLO wizard
-            collected on its Tax Classification & Fees step until 16 September
-            2026. That box was removed because it priced nothing: measured
-            against a filing holding all six clearances, the storey count moved
-            the total by zero pesos. Only two fee rules read it at all — a
-            lessor's building, by storey — and both need a fine permit category
-            that is one of the sixty still open with BPLO.
-
-            So the only consumer left was this line, on the one paper that
-            actually asks for it. Left derived, it would print empty forever —
-            exactly what happened to the lessor boxes below.
+            Business Operation asked it until 16 September 2026, then this
+            sheet, BFP's and OBO's each asked it themselves. It is asked once
+            again, required, beside Business Area, and the three sheets show
+            that answer. A filing whose application holds none (older ones,
+            amendments) keeps the editable box, required like BFP's and OBO's.
           */}
-          <label className={formCell.short}>
-            <FieldLabel optional>No. of Storey of Building</FieldLabel>
-            <input
-              value={get(data, 'building_storeys')}
-              onChange={(e) => set('building_storeys', e.target.value)}
-              readOnly={ro}
-              inputMode="numeric"
-              placeholder="e.g. 2"
-              className={inputCls}
-            />
-            <CarriedTag field="building_storeys" />
-          </label>
+          <PermitAnswer field="building_storeys" label="No. of Storey of Building" data={data} className={formCell.short} strict>
+            <label className={formCell.short}>
+              <FieldLabel required>No. of Storey of Building</FieldLabel>
+              <input
+                value={get(data, 'building_storeys')}
+                onChange={(e) => set('building_storeys', sheetInput('ZONING', 'building_storeys', e.target.value))}
+                readOnly={ro}
+                inputMode="numeric"
+                placeholder="e.g. 2"
+                className={inputCls}
+              />
+              <CarriedTag field="building_storeys" />
+            </label>
+          </PermitAnswer>
           {/*
             VIII.C and VIII.D — "(if lessee)" on the paper, so they are blank on
             an owner-occupied site by design rather than by omission.
@@ -1771,6 +1903,7 @@ function ZoningFields({
             <input
               value={get(data, 'lessor_name')}
               onChange={(e) => set('lessor_name', e.target.value)}
+              maxLength={255}
               readOnly={ro}
               placeholder="Full name"
               className={inputCls}
@@ -1783,6 +1916,7 @@ function ZoningFields({
             <input
               value={get(data, 'lessor_address')}
               onChange={(e) => set('lessor_address', e.target.value)}
+              maxLength={255}
               readOnly={ro}
               placeholder="No. of Street, Barangay, Municipality/City"
               className={inputCls}
@@ -1829,7 +1963,8 @@ function ZoningFields({
             <FieldLabel optional>Authorized Representative</FieldLabel>
             <input
               value={get(data, 'authorized_representative')}
-              onChange={(e) => set('authorized_representative', e.target.value)}
+              onChange={(e) => set('authorized_representative', stripDigits(e.target.value))}
+              maxLength={255}
               readOnly={ro}
               placeholder="Full name"
               className={inputCls}
@@ -2021,6 +2156,7 @@ function SanitaryFields({
             <input
               value={get(data, 'operating_hours')}
               onChange={(e) => set('operating_hours', e.target.value)}
+              maxLength={255}
               readOnly={ro}
               placeholder="e.g. 8:00 AM – 10:00 PM, Mon–Sat"
               className={inputCls}
@@ -2039,7 +2175,7 @@ function SanitaryFields({
             <input
               inputMode="numeric"
               value={get(data, 'toilets_count')}
-              onChange={(e) => set('toilets_count', e.target.value)}
+              onChange={(e) => set('toilets_count', sheetInput('SANITARY', 'toilets_count', e.target.value))}
               readOnly={ro}
               placeholder="e.g. 2"
               className={`${inputCls} tnum`}
@@ -2081,7 +2217,7 @@ function SanitaryFields({
               <input
                 inputMode="numeric"
                 value={get(data, 'seating_capacity')}
-                onChange={(e) => set('seating_capacity', e.target.value)}
+                onChange={(e) => set('seating_capacity', sheetInput('SANITARY', 'seating_capacity', e.target.value))}
                 readOnly={ro}
                 placeholder="e.g. 40"
                 className={`${inputCls} tnum`}
@@ -2999,24 +3135,26 @@ function CecFields({
 
         {/* OWNER&rsquo;S ADDRESS | BUSINESS ADDRESS */}
           {/*
-            The one address the register does not hold. `business_addresses` has
-            an `address_type` column and nothing has ever written a residential
-            row to it, so the proprietor's own address has no home on the BPLO
-            form yet. Asked here as one line, matching the paper's single box and
-            its own prompt. If BPLO ever grows item A16 this becomes a carried
-            field like the rest and the question comes off.
+            The one address the business record does not hold, so it comes
+            from the account — the home address given at registration — and is
+            read-only (client, 10 November 2026: "ask once, lock everywhere").
+            One line, matching the paper's single box. An account without one
+            leaves the box to type, still required.
           */}
-          <label className={formCell.half}>
-            <FieldLabel required>Owner&rsquo;s Address</FieldLabel>
-            <input
-              value={get(data, 'owner_address')}
-              onChange={(e) => set('owner_address', e.target.value)}
-              readOnly={ro}
-              placeholder="No. of Street, Barangay, Municipality/City, Province"
-              className={inputCls}
-            />
-            <CarriedTag field="owner_address" />
-          </label>
+          <AccountAnswer field="owner_address" label="Owner’s Address" data={data} className={formCell.half}>
+            <label className={formCell.half}>
+              <FieldLabel required>Owner&rsquo;s Address</FieldLabel>
+              <input
+                value={get(data, 'owner_address')}
+                onChange={(e) => set('owner_address', e.target.value)}
+                maxLength={255}
+                readOnly={ro}
+                placeholder="No. of Street, Barangay, Municipality/City, Province"
+                className={inputCls}
+              />
+              <CarriedTag field="owner_address" />
+            </label>
+          </AccountAnswer>
           <DerivedField
             className={formCell.half}
             label={<>Business Address<FromApplicationTag /></>}
@@ -3166,7 +3304,8 @@ function FsicFields({
             </span>
             <input
               value={get(data, 'authorized_representative')}
-              onChange={(e) => set('authorized_representative', e.target.value)}
+              onChange={(e) => set('authorized_representative', stripDigits(e.target.value))}
+              maxLength={255}
                 readOnly={ro}
               placeholder="Full name"
               className={inputCls}
@@ -3180,17 +3319,16 @@ function FsicFields({
         <SectionMarker letter="B" label="The Premises" />
         <div className={formGridCls}>
           {/*
-            "TYPE OF OCCUPANCY / BUSINESS NATURE". Seeded from the line of
-            business and editable, because BFP's vocabulary is not PSIC's — a
-            restaurant is "Assembly" to a fire officer — and the applicant is
-            the one who knows which.
-          */}
-          {/*
-            Asked here, on BFP's own paper, since 5 October 2026. These two were
-            read-only copies of the Occupancy sheet whenever that permit was on
-            the filing, which made this sheet wait on that one. The sheets are
-            separate now — client: "Make them separate" — and each paper asks
-            its own boxes.
+            "TYPE OF OCCUPANCY / BUSINESS NATURE" and "NO. OF STOREY". Both
+            read-only from the Business Permit application: the line of
+            business since 3 November 2026 (it was seeded and editable), the
+            storey count since 10 November 2026, from Business Operation
+            (client: "ask once, lock everywhere"). Each stays editable only
+            where the application holds no answer.
+
+            Until 5 October 2026 they were read-only copies of the Occupancy
+            sheet, which made this sheet wait on that one. Client: "Make them
+            separate" — neither sheet reads the other now.
           */}
           <PermitAnswer field="occupancy_type" label="Type of Occupancy / Business Nature" data={data} className={formCell.half}>
             <label className={formCell.half}>
@@ -3198,6 +3336,7 @@ function FsicFields({
               <input
                 value={get(data, 'occupancy_type')}
                 onChange={(e) => set('occupancy_type', e.target.value)}
+                maxLength={255}
                 readOnly={ro}
                 placeholder="e.g. Mercantile, Assembly, Business"
                 className={inputCls}
@@ -3205,18 +3344,20 @@ function FsicFields({
               <CarriedTag field="occupancy_type" />
             </label>
           </PermitAnswer>
-          <label className={formCell.short}>
-            <FieldLabel required>No. of Storeys</FieldLabel>
-            <input
-              inputMode="numeric"
-              value={get(data, 'building_storeys')}
-              onChange={(e) => set('building_storeys', e.target.value)}
-              readOnly={ro}
-              placeholder="e.g. 2"
-              className={`${inputCls} tnum`}
-            />
-            <CarriedTag field="building_storeys" />
-          </label>
+          <PermitAnswer field="building_storeys" label="No. of Storeys" data={data} className={formCell.short} strict>
+            <label className={formCell.short}>
+              <FieldLabel required>No. of Storeys</FieldLabel>
+              <input
+                inputMode="numeric"
+                value={get(data, 'building_storeys')}
+                onChange={(e) => set('building_storeys', sheetInput('FSIC', 'building_storeys', e.target.value))}
+                readOnly={ro}
+                placeholder="e.g. 2"
+                className={`${inputCls} tnum`}
+              />
+              <CarriedTag field="building_storeys" />
+            </label>
+          </PermitAnswer>
           {/*
             The three the applicant has already given. Floor area is the same
             figure the zoning sheet is assessed on — item 1 of Business
@@ -3302,6 +3443,7 @@ function OccupancyFields({
             <input
               value={get(data, 'building_permit_no')}
               onChange={(e) => set('building_permit_no', e.target.value)}
+              maxLength={255}
               readOnly={ro}
               className={inputCls}
             />
@@ -3312,6 +3454,7 @@ function OccupancyFields({
             <input
               value={get(data, 'fsec_no')}
               onChange={(e) => set('fsec_no', e.target.value)}
+              maxLength={255}
               readOnly={ro}
               className={inputCls}
             />
@@ -3328,6 +3471,7 @@ function OccupancyFields({
               type="date"
               value={get(data, 'building_permit_date')}
               onChange={(e) => set('building_permit_date', e.target.value)}
+              max={todayISO()}
               readOnly={ro}
               className={inputCls}
             />
@@ -3339,6 +3483,7 @@ function OccupancyFields({
               type="date"
               value={get(data, 'fsec_date')}
               onChange={(e) => set('fsec_date', e.target.value)}
+              max={todayISO()}
               readOnly={ro}
               className={inputCls}
             />
@@ -3361,62 +3506,62 @@ function OccupancyFields({
             value={business.ownerName}
           />
           {/*
-            Asked, not carried, and the distinction matters on this one box.
-            The paper wants where the OWNER lives; BizTrack holds where the
-            BUSINESS is, and on a filing whose premises is rented those are
-            different places. Prefilling the business address here would put a
-            wrong answer on a form the Building Official posts to.
+            Where the OWNER lives, not where the business is — on a rented
+            premises those differ, and the Building Official posts to this one.
+            So it is the account's home address, read-only (client, 10 November
+            2026: "ask once, lock everywhere"), with the postal code in the
+            paper's own ZIP Code box. An account without one leaves both boxes
+            to type.
           */}
-          <label className={formCell.half}>
-            <FieldLabel optional>Address of Owner / Permittee</FieldLabel>
-            <input
-              value={get(data, 'owner_address')}
-              onChange={(e) => set('owner_address', e.target.value)}
-              readOnly={ro}
-              placeholder="If not the business address"
-              className={inputCls}
-            />
-            <CarriedTag field="owner_address" />
-          </label>
+          <AccountAnswer field="owner_address" label="Address of Owner / Permittee" data={data} className={formCell.half}>
+            <label className={formCell.half}>
+              <FieldLabel optional>Address of Owner / Permittee</FieldLabel>
+              <input
+                value={get(data, 'owner_address')}
+                onChange={(e) => set('owner_address', e.target.value)}
+                maxLength={255}
+                readOnly={ro}
+                placeholder="If not the business address"
+                className={inputCls}
+              />
+              <CarriedTag field="owner_address" />
+            </label>
+          </AccountAnswer>
           {/* Printed beside the address on the paper; the OBO posts to it. */}
-          <label className={formCell.short}>
-            <FieldLabel optional>ZIP Code</FieldLabel>
-            <input
-              inputMode="numeric"
-              value={get(data, 'owner_zip')}
-              onChange={(e) => set('owner_zip', e.target.value)}
-              readOnly={ro}
-              placeholder="1470"
-              className={`${inputCls} tnum`}
-            />
-            <CarriedTag field="owner_zip" />
-          </label>
+          <AccountAnswer field="owner_zip" label="ZIP Code" data={data} className={formCell.short}>
+            <label className={formCell.short}>
+              <FieldLabel optional>ZIP Code</FieldLabel>
+              <input
+                inputMode="numeric"
+                value={get(data, 'owner_zip')}
+                onChange={(e) => set('owner_zip', sheetInput('OCCUPANCY', 'owner_zip', e.target.value))}
+                readOnly={ro}
+                placeholder="1470"
+                className={`${inputCls} tnum`}
+              />
+              <CarriedTag field="owner_zip" />
+            </label>
+          </AccountAnswer>
           {/*
             ── From the paper, 4 October 2026 ───────────────────────────────
 
-            The unified OBO form prints Tel. No. beside the owner's address,
-            and under "Submitted by: Owner/Permittee" asks for the Community
-            Tax Certificate — number, date and place issued. All four are the
-            owner's to answer and were not asked. The CTC is optional: not
-            every owner holds one today, and a blank the office can ask for is
-            better than a gate that stops the sheet.
+            Under "Submitted by: Owner/Permittee" the unified OBO form asks for
+            the Community Tax Certificate — number, date and place issued. The
+            owner's to answer, and optional: not every owner holds one today,
+            and a blank the office can ask for is better than a gate.
+
+            Tel. No. was asked here too, beside the "Tel. No. (from your
+            application)" this block already shows — two boxes for one number.
+            The asked one went on 10 November 2026 (client: "ask once, lock
+            everywhere"); the printed form falls back to the business's number
+            when a sheet holds none (pdf/forms/occupancy.blade.php). An older
+            sheet's `owner_tel` is kept and still printed.
           */}
-          <label className={formCell.quarter}>
-            <FieldLabel optional>Tel. No.</FieldLabel>
-            <input
-              inputMode="tel"
-              value={get(data, 'owner_tel')}
-              onChange={(e) => set('owner_tel', e.target.value)}
-              readOnly={ro}
-              className={inputCls}
-            />
-            <CarriedTag field="owner_tel" />
-          </label>
           <label className={formCell.quarter}>
             <FieldLabel optional>Community Tax Certificate No.</FieldLabel>
             <input
               value={get(data, 'owner_ctc_no')}
-              onChange={(e) => set('owner_ctc_no', e.target.value)}
+              onChange={(e) => set('owner_ctc_no', sheetInput('OCCUPANCY', 'owner_ctc_no', e.target.value))}
               readOnly={ro}
               className={inputCls}
             />
@@ -3428,6 +3573,7 @@ function OccupancyFields({
               type="date"
               value={get(data, 'owner_ctc_date')}
               onChange={(e) => set('owner_ctc_date', e.target.value)}
+              max={todayISO()}
               readOnly={ro}
               className={inputCls}
             />
@@ -3438,6 +3584,7 @@ function OccupancyFields({
             <input
               value={get(data, 'owner_ctc_place')}
               onChange={(e) => set('owner_ctc_place', e.target.value)}
+              maxLength={255}
               readOnly={ro}
               placeholder="Malabon City"
               className={inputCls}
@@ -3475,6 +3622,7 @@ function OccupancyFields({
             <input
               value={get(data, 'project_name')}
               onChange={(e) => set('project_name', e.target.value)}
+              maxLength={255}
               readOnly={ro}
               className={inputCls}
             />
@@ -3486,6 +3634,7 @@ function OccupancyFields({
               <input
                 value={get(data, 'project_location')}
                 onChange={(e) => set('project_location', e.target.value)}
+                maxLength={255}
                 readOnly={ro}
                 placeholder="Lot / Block / Street / Barangay"
                 className={inputCls}
@@ -3494,9 +3643,9 @@ function OccupancyFields({
             </label>
           </PermitAnswer>
           {/*
-            This sheet OWNS the occupancy type and the storey count — BFP's
-            paper prints them too and carries these answers read-only. See the
-            note above the component.
+            The occupancy type and the storey count are the Business Permit
+            application's, read-only like BFP's (client, 3 and 10 November
+            2026). Neither sheet carries the other's answers any more.
           */}
           <PermitAnswer field="occupancy_type" label="Use / Character of Occupancy" data={data} className={formCell.quarter}>
             <label className={formCell.quarter}>
@@ -3504,6 +3653,7 @@ function OccupancyFields({
               <input
                 value={get(data, 'occupancy_type')}
                 onChange={(e) => set('occupancy_type', e.target.value)}
+                maxLength={255}
                 readOnly={ro}
                 placeholder="e.g. Mercantile, Assembly, Business"
                 className={inputCls}
@@ -3511,24 +3661,26 @@ function OccupancyFields({
               <CarriedTag field="occupancy_type" />
             </label>
           </PermitAnswer>
-          <label className={formCell.short}>
-            <FieldLabel required>No. of Storeys</FieldLabel>
-            <input
-              inputMode="numeric"
-              value={get(data, 'building_storeys')}
-              onChange={(e) => set('building_storeys', e.target.value)}
-              readOnly={ro}
-              placeholder="e.g. 2"
-              className={`${inputCls} tnum`}
-            />
-            <CarriedTag field="building_storeys" />
-          </label>
+          <PermitAnswer field="building_storeys" label="No. of Storeys" data={data} className={formCell.short} strict>
+            <label className={formCell.short}>
+              <FieldLabel required>No. of Storeys</FieldLabel>
+              <input
+                inputMode="numeric"
+                value={get(data, 'building_storeys')}
+                onChange={(e) => set('building_storeys', sheetInput('OCCUPANCY', 'building_storeys', e.target.value))}
+                readOnly={ro}
+                placeholder="e.g. 2"
+                className={`${inputCls} tnum`}
+              />
+              <CarriedTag field="building_storeys" />
+            </label>
+          </PermitAnswer>
           <label className={formCell.short}>
             <FieldLabel required>No. of Units</FieldLabel>
             <input
               inputMode="numeric"
               value={get(data, 'building_units')}
-              onChange={(e) => set('building_units', e.target.value)}
+              onChange={(e) => set('building_units', sheetInput('OCCUPANCY', 'building_units', e.target.value))}
               readOnly={ro}
               placeholder="e.g. 1"
               className={`${inputCls} tnum`}
@@ -3550,7 +3702,7 @@ function OccupancyFields({
               <input
                 inputMode="decimal"
                 value={get(data, 'total_floor_area_sqm')}
-                onChange={(e) => set('total_floor_area_sqm', e.target.value)}
+                onChange={(e) => set('total_floor_area_sqm', sheetInput('OCCUPANCY', 'total_floor_area_sqm', e.target.value))}
                 readOnly={ro}
                 className={`${inputCls} tnum`}
               />
@@ -3585,57 +3737,22 @@ function OccupancyFields({
         [client, 27 October 2026]: which documents were handed in, and the
         licensed professional who signed the Certificate of Completion. The
         certificate prints these; a blank here is a blank there.
+
+        Client, 10 November 2026: the "Documents Submitted" boxes and
+        "Other Document (specify)" left the owner's sheet. The boxes are
+        ticked by the API from this sheet's uploads (Certificate of
+        Completion, as-built plans, construction logbook —
+        OfficeFormAnswers::derive), and "Others" is OBO's to record on its
+        review screen. What stays is the one thing only the owner can copy
+        off the sealed page: who signed it, and whether as Civil Engineer or
+        Architect.
       */}
       <section className="space-y-3">
         <SectionMarker letter="D" label="Certificate of Completion" required />
-        <div>
-          <FieldLabel required>Documents Submitted</FieldLabel>
-          <div className="mt-1 flex flex-wrap gap-x-5 gap-y-1.5">
-            {COMPLETION_DOCUMENTS.map((doc) => {
-              const chosen = get(data, 'completion_documents')
-                .split(',')
-                .map((d) => d.trim())
-                .filter(Boolean)
-              const on = chosen.includes(doc)
-              return (
-                <label key={doc} className="flex items-center gap-2 text-sm text-ink">
-                  <input
-                    type="checkbox"
-                    checked={on}
-                    readOnly={ro}
-                    onChange={() =>
-                      ro ||
-                      set(
-                        'completion_documents',
-                        (on ? chosen.filter((d) => d !== doc) : [...chosen, doc])
-                          .filter((d) => COMPLETION_DOCUMENTS.includes(d as (typeof COMPLETION_DOCUMENTS)[number]))
-                          .join(', '),
-                      )
-                    }
-                    className="h-4 w-4 accent-royal"
-                  />
-                  {doc}
-                </label>
-              )
-            })}
-          </div>
-          <CarriedTag field="completion_documents" />
-        </div>
         <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
-          <div>
-            <FieldLabel required={get(data, 'completion_documents').includes('Others')}>
-              Other Document (specify)
-            </FieldLabel>
-            <input
-              value={get(data, 'completion_other_document')}
-              onChange={(e) => set('completion_other_document', e.target.value)}
-              readOnly={ro}
-              className={inputCls}
-            />
-            <CarriedTag field="completion_other_document" />
-          </div>
-          <div>
-            <FieldLabel required>Certificate of Completion — Submitted By</FieldLabel>
+          <label className="block">
+            <FieldLabel required>Engineer / architect who signed your Certificate of Completion</FieldLabel>
+            <span className="-mt-0.5 mb-1.5 block text-xs text-ink-muted">Copy it from the certificate.</span>
             <input
               value={get(data, 'completion_submitted_by')}
               onChange={(e) => set('completion_submitted_by', e.target.value)}
@@ -3644,15 +3761,19 @@ function OccupancyFields({
               className={inputCls}
             />
             <CarriedTag field="completion_submitted_by" />
-          </div>
+          </label>
           <div>
-            <FieldLabel required>Profession / Licence</FieldLabel>
-            <input
+            <FieldLabel required>Profession</FieldLabel>
+            {/*
+              The two the certificate prints. An answer typed before
+              10 November 2026 that is neither shows no chip selected, so
+              the owner picks again rather than carrying it onto the paper.
+            */}
+            <ChipRow
+              options={COMPLETION_PROFESSIONS}
               value={get(data, 'completion_professional')}
-              onChange={(e) => set('completion_professional', e.target.value)}
-              readOnly={ro}
-              placeholder="Civil Engineer, Architect…"
-              className={inputCls}
+              onChange={(v) => set('completion_professional', v)}
+              label="Profession"
             />
             <CarriedTag field="completion_professional" />
           </div>

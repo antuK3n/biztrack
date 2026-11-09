@@ -47,6 +47,7 @@ use App\Support\RenewalSeason;
 use App\Support\ReturnHistory;
 use App\Support\ReturnTargets;
 use App\Support\SheetRequirements;
+use App\Support\Tin;
 use App\Support\ZoningRequirements;
 use Carbon\Carbon;
 use Carbon\CarbonImmutable;
@@ -570,6 +571,50 @@ class WorkflowService
     }
 
     /**
+     * The clearances BPLO's Approve is still waiting for on an amendment, and
+     * where each one stands.
+     *
+     * Client, 10 November 2026, choosing "Waiting for Zoning instead of an
+     * error": BPLO pressed Approve on a move and met the red refusal from
+     * `approveAmendment`. The review now shuts Approve beforehand and says
+     * what it is waiting for — this is what it reads. The refusal stays as
+     * the safety net, on the same predicate (`outstandingClearances`), so
+     * the screen and the server cannot disagree about whether to wait.
+     *
+     * The state is the applicant's or the office's, read off the pivot:
+     *  - `not_handed_in` — applied for at submit, sheet not yet handed in;
+     *  - `with_office`   — handed in, CPDO reviewing or inspecting;
+     *  - `with_applicant` — CPDO sent it back or refused it.
+     *
+     * Null on anything that is not an amendment; empty when nothing waits.
+     * Reads the loaded `permitTypes` (with `department`, if loaded).
+     *
+     * @return list<array{code: string, name: string, office: ?string, state: string}>|null
+     */
+    public static function amendmentWaitingFor(Application $app): ?array
+    {
+        if ($app->application_type !== ApplicationType::Amendment) {
+            return null;
+        }
+
+        return $app->permitTypes
+            ->filter(fn (PermitType $pt) => $pt->isRequiredClearance())
+            ->reject(fn (PermitType $pt) => $pt->pivot->status === ClearanceStatus::Approved)
+            ->map(fn (PermitType $pt) => [
+                'code' => $pt->code,
+                'name' => $pt->name,
+                'office' => $pt->department?->code,
+                'state' => match ($pt->pivot->status) {
+                    ClearanceStatus::ForApproval, ClearanceStatus::ForInspection => 'with_office',
+                    ClearanceStatus::Returned, ClearanceStatus::Rejected => 'with_applicant',
+                    default => 'not_handed_in',
+                },
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
      * Put ZONING on an amendment DRAFT exactly when submitting it would.
      *
      * The wizard's Zoning Clearance step is CPDD's own sheet, and its answers
@@ -1011,6 +1056,17 @@ class WorkflowService
             $this->raiseOtherRequirements($app);
 
             /*
+             * The blank TIN, asked for at submit since 10 November 2026
+             * (client: *"TIN as other requirements is probably missing."*).
+             * Fresh relations, because `attachRequiredPermitTypes` just
+             * changed the permit set this reads.
+             */
+            $app->load(['permitTypes', 'business']);
+            if (self::asksForTin($app)) {
+                $this->raiseTinRequirement($app);
+            }
+
+            /*
              * ── Who is waiting on it, and BPLO is not always the answer ──────
              *
              * A clearance-only renewal has no main form for BPLO to read and no
@@ -1303,6 +1359,11 @@ class WorkflowService
                 .($others !== '' ? " Other permits you will apply for after paying: {$others}." : ''),
             );
 
+            /*
+             * A safety net since 10 November 2026, when the TIN moved to
+             * submit: it still reaches a filing submitted before then, and
+             * raises nothing on one that already carries it.
+             */
             $this->raiseTinRequirement($app);
         });
     }
@@ -1394,18 +1455,30 @@ class WorkflowService
     public const TIN_REQUIREMENT_KEY = 'business.tin';
 
     /**
-     * Ask for the TIN the applicant did not give, without holding anything up.
+     * Is the blank TIN asked for on this filing?
      *
-     * Raised inside the approval transaction, so a filing cannot reach
-     * Pending Payment carrying a blank TIN and no requirement to fix it —
-     * the two facts are written together or not at all.
+     * One test for the press and for the wizard's preview
+     * (`PaymentController::feePreview`), so what the applicant is told and
+     * what is raised cannot disagree. Item 3 blank, on a filing that carries
+     * the Business Permit and is not an amendment — the filings BPLO approved
+     * a form for, which is where the TIN was asked until 10 November 2026. A
+     * clearance-only renewal and an amendment never reached that approval, so
+     * they are not asked now either.
      *
-     * `requested_by_user_id` is null on purpose. The column is nullable and
-     * this requirement has no author: attributing it to whichever officer
-     * pressed Approve would put a person's name on a sentence they did not
-     * write and a judgement they did not make. The DEPARTMENT is BPLO's,
-     * because BPLO is the office that must close it.
+     * Reads the loaded `permitTypes` and `business`; the caller loads them.
      */
+    public static function asksForTin(Application $app): bool
+    {
+        if ($app->application_type === ApplicationType::Amendment) {
+            return false;
+        }
+        if ($app->business === null || trim((string) $app->business->tin) !== '') {
+            return false;
+        }
+
+        return $app->permitTypes->contains(fn (PermitType $pt) => $pt->code === PermitType::OUTCOME_CODE);
+    }
+
     /**
      * The Other Requirements the business's nature calls for, raised at submit.
      *
@@ -1417,11 +1490,10 @@ class WorkflowService
      * (application, system_key) so a draft returned and submitted again does
      * not raise it twice.
      *
-     * At SUBMIT rather than at BPLO approval, where the TIN is raised: the
-     * TIN is a gap an officer found in a form they were reading; these are
-     * facts of the business the applicant already declared, and the sooner
-     * they are told what the declaration commits them to, the sooner the
-     * answer is there for the office that needs it.
+     * At SUBMIT: these are facts of the business the applicant already
+     * declared, and the sooner they are told what the declaration commits
+     * them to, the sooner the answer is there for the office that needs it.
+     * The blank TIN followed on 10 November 2026 (`raiseTinRequirement`).
      */
     private function raiseOtherRequirements(Application $app): void
     {
@@ -1471,6 +1543,22 @@ class WorkflowService
         }
     }
 
+    /**
+     * Ask for the TIN the applicant did not give, without holding anything up.
+     *
+     * Raised at submit since 10 November 2026 (client: *"TIN as other
+     * requirements is probably missing."*), inside the submit transaction and
+     * on `asksForTin`, so the applicant is asked the moment they file rather
+     * than after BPLO has read the form. It was raised at BPLO approval
+     * before; that call stays as a safety net for filings submitted earlier,
+     * and the `exists` check below keeps the two from stacking.
+     *
+     * `requested_by_user_id` is null on purpose. The column is nullable and
+     * this requirement has no author: attributing it to an officer would put
+     * a person's name on a sentence they did not write and a judgement they
+     * did not make. The DEPARTMENT is BPLO's, because BPLO is the office
+     * that must close it.
+     */
     private function raiseTinRequirement(Application $app): void
     {
         $business = $app->business;
@@ -1494,11 +1582,10 @@ class WorkflowService
             'application_id' => $app->id,
             'requested_by_user_id' => null,
             'department_id' => $this->bploDepartmentId(),
-            'title' => 'Tax Identification Number (TIN)',
-            'description' => 'You left the Tax Identification Number (TIN) blank on your application form. '
-                .'Type it in your reply below — there is no document to attach. '
-                .'It is the TIN of the owner or the registered entity, as printed on your BIR papers, '
-                .'like 123-456-789-000.',
+            // The wizard's preview repeats these words (OtherRequirementRules::TIN_SUMMARY).
+            'title' => OtherRequirementRules::TIN_TITLE,
+            'description' => OtherRequirementRules::TIN_SUMMARY
+                .' Type it in your reply below — there is no document to attach.',
             'request_type' => 'message',
             'system_key' => self::TIN_REQUIREMENT_KEY,
             'status' => OfficerRequestStatus::Pending,
@@ -1522,13 +1609,76 @@ class WorkflowService
          * exactly the same word.
          *
          * The wording is the officer-raised one's, unchanged. "An officer
-         * requested" is true enough — BPLO's approval is what raised it and
-         * BPLO is the office that will close it — and a second near-identical
+         * requested" is true enough — BPLO is the office that will close it
+         * (raised at submit since 10 November 2026) — and a second near-identical
          * sentence for the system's own case would be two spellings of one
          * event in the applicant's notification list.
          */
         if ($app->applicant) {
             $this->notify->requestCreated($req->load('application'), $app->applicant);
+        }
+    }
+
+    /**
+     * Close the TIN requirement once the TIN is on the business by another door.
+     *
+     * Client, 10 November 2026. Raised at submit, the requirement can now be
+     * outlived by the form: BPLO returns the filing, the applicant fills item
+     * 3 and resubmits, and the requirement stays open asking for a number
+     * the register already holds. Called from `resubmit` and from the owner's
+     * business save (`BusinessController::update`).
+     *
+     * Only a requirement still with the applicant is closed. One the
+     * applicant already answered through its own field (`Submitted`) is the
+     * office's to rule on, and one already ruled on is left as ruled.
+     *
+     * Recorded the way an answer and its acceptance are: the TIN as the
+     * applicant's submission, stamped fulfilled, so the history reads what was
+     * given and how it closed. `reviewed_by_user_id` stays null — no officer
+     * ruled, for the same reason the requirement has no author.
+     */
+    public function settleTinRequirements(Business $business): void
+    {
+        $tin = Tin::normalize((string) $business->tin);
+        if (! Tin::isValid($tin)) {
+            return;
+        }
+
+        $open = OfficerRequest::query()
+            ->where('system_key', self::TIN_REQUIREMENT_KEY)
+            ->whereHas('application', fn ($q) => $q->where('business_id', $business->id))
+            ->with('application')
+            ->get()
+            ->filter(fn (OfficerRequest $req) => $req->status?->acceptsResponse());
+
+        foreach ($open as $req) {
+            DB::transaction(function () use ($req, $tin) {
+                $now = now();
+                $remark = 'Given on the application form.';
+
+                $req->responses()->create([
+                    'user_id' => $req->application?->applicant_user_id,
+                    'body' => $tin,
+                    'review_outcome' => OfficerRequestStatus::Fulfilled->value,
+                    'review_remarks' => $remark,
+                    'reviewed_at' => $now,
+                    'reviewed_by_user_id' => null,
+                ]);
+                $req->update([
+                    'status' => OfficerRequestStatus::Fulfilled,
+                    'applicant_response' => $tin,
+                    'submitted_at' => $now,
+                    'reviewed_by_user_id' => null,
+                    'reviewed_at' => $now,
+                    'remarks' => $remark,
+                ]);
+
+                Audit::log('request.closed', $req, [
+                    'outcome' => OfficerRequestStatus::Fulfilled->value,
+                    'by' => 'system',
+                    'reason' => 'The TIN was given on the application form.',
+                ]);
+            });
         }
     }
 
@@ -2123,6 +2273,11 @@ class WorkflowService
              * next resubmission against values nobody was asked about.
              */
             $app->forceFill(['returned_values' => null])->save();
+
+            // A TIN filled in on the way back answers the TIN requirement (10 November 2026).
+            if ($app->business !== null) {
+                $this->settleTinRequirements($app->business->fresh());
+            }
 
             $this->transition($app, ApplicationStatus::ForApproval, 'Applicant resubmitted revisions.');
         });
@@ -3027,6 +3182,9 @@ class WorkflowService
                     $this->tellOfficeOfSubmission($app, $type->issuing_department_id, $type);
                 }
             }
+
+            // An amendment BPLO is waiting on: tell BPLO it is with CPDO now.
+            $this->tellBploOfHandIn($app->fresh(), $type);
 
             $this->refreshReadiness($app);
         });
@@ -5986,6 +6144,8 @@ class WorkflowService
             $row->permitType->name.' has been approved and issued.',
         );
 
+        $this->tellBploAmendmentIsClear($app->fresh(), $row->permitType);
+
         /*
          * A granted permit may be the one that was holding the business
          * permit suspended. Asked here rather than only on the re-apply path
@@ -6781,8 +6941,9 @@ class WorkflowService
      * (PaymentController::authorizeCaseHolder), or every active BPLO officer
      * when nobody holds it, so one of them takes it with Assign to Me.
      *
-     * On every proof the owner sends, a replacement included: the replacement
-     * is what Mark as paid will show, so the officer should hear of it. Called
+     * Once per proof: a second send while one is pending is refused before
+     * this is reached (client, 10 November 2026), so the owner's next notice
+     * comes only after BPLO rejects the first. Called
      * inside the transaction that keeps the proof (PaymentProofController::store),
      * so a refused or rolled-back send tells nobody.
      *
@@ -6795,6 +6956,67 @@ class WorkflowService
             $app,
             $this->bploDepartmentId(),
             fn (User $officer) => $this->notify->paymentProofReceived($app, $officer),
+        );
+    }
+
+    /**
+     * Tell BPLO the owner has handed in a clearance its amendment waits for.
+     *
+     * Client, 10 November 2026 (option 2 of the "does not show in the admin
+     * side" report): BPLO hears when the Zoning sheet goes to CPDO, not only
+     * when CPDO issues it. Same people as `tellBploAmendmentIsClear`. Once
+     * per hand-in: `submitClearanceForm` reaches here only when the sheet
+     * actually moves, so a re-submission after CPDO returns it tells BPLO
+     * again, and a re-save of a sheet already with CPDO does not.
+     *
+     * Only an amendment at For Approval whose wait list names this permit
+     * (`amendmentWaitingFor`); a new filing's clearances are not BPLO's wait.
+     */
+    private function tellBploOfHandIn(Application $app, PermitType $type): void
+    {
+        if ($app->status !== ApplicationStatus::ForApproval) {
+            return;
+        }
+
+        $waiting = collect(self::amendmentWaitingFor($app->load('permitTypes')) ?? [])
+            ->firstWhere('code', $type->code);
+        if ($waiting === null) {
+            return;
+        }
+
+        $this->tellOffice(
+            $app,
+            $this->bploDepartmentId(),
+            fn (User $officer, ApplicationAssignment $review) => $this->notify->amendmentClearanceHandedIn($app, $officer, $review, $type),
+        );
+    }
+
+    /**
+     * Tell BPLO an amendment it was waiting on is now clear to approve.
+     *
+     * Client, 10 November 2026: the review shuts Approve while a move's
+     * Zoning Clearance is open (`amendmentWaitingFor`), so BPLO needs to hear
+     * when it stops being shut — otherwise the wait just moves from a red
+     * error to an officer re-opening the filing to check. Same people as
+     * "New application" (`tellOffice`): the BPLO officer holding it, or
+     * BPLO's reviewers when nobody does.
+     *
+     * Only when this grant was the LAST thing outstanding and BPLO still has
+     * the decision to make (For Approval). A returned amendment is with the
+     * applicant, so "ready to approve" would not be true yet.
+     */
+    private function tellBploAmendmentIsClear(Application $app, PermitType $issued): void
+    {
+        if ($app->application_type !== ApplicationType::Amendment
+            || $app->status !== ApplicationStatus::ForApproval
+            || $this->outstandingClearances($app->load('permitTypes'))->isNotEmpty()) {
+            return;
+        }
+
+        $this->tellOffice(
+            $app,
+            $this->bploDepartmentId(),
+            fn (User $officer, ApplicationAssignment $review) => $this->notify->amendmentReadyToApprove($app, $officer, $review, $issued),
         );
     }
 

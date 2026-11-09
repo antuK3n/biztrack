@@ -1,25 +1,17 @@
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import {
-  CalendarIcon,
-  CheckCircleIcon,
-  DownloadIcon,
-  EyeIcon,
-  XCircleIcon,
-  XIcon,
-} from '../../components/icons'
 import { Alert } from '../../components/ui/Alert'
 import { RequestedChanges } from '../../components/RequestedChanges'
 import { ReturnHistory } from '../../components/ReturnHistory'
-import { MessagesPanel } from '../../components/MessagesPanel'
-import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
-import { PillButton, StatusCard } from '../../components/ui/Proto'
-import { formatDate, formatDateTime, formatMoney } from '../../lib/format'
+import { PillButton } from '../../components/ui/Proto'
+import { StatusBadge } from '../../components/ui/StatusBadge'
+import { formatDate, formatDateTime } from '../../lib/format'
 import { mainFormTargets, targetCodes } from '../../lib/returnTargets'
-import { applications, officeForms } from '../../lib/resources'
+import { applications } from '../../lib/resources'
 import {
-  TONE_CLASSES,
+  filingStatusMeta,
   isGatheringOtherPermits,
   labelHistory,
   otherPermitProgress,
@@ -28,45 +20,31 @@ import type { Application, TimelineEntry } from '../../lib/types'
 import { useAsync } from '../../lib/useAsync'
 import { toApiError } from '../../lib/api'
 import { MainFormCorrections } from './MainFormCorrections'
-import { OfficeFormSheet, OFFICE_FORM_META, hasOfficeForm } from './OfficeFormStep'
-import { carriedOverBusiness } from './carriedOver'
-import type { OfficeForm } from '../../lib/types'
 
 /*
- * Application status page (PDF p50/p52/p54–55/p57–58): centered serif
- * "Application Status" (or "Payment Status"), a StatusCard with the colored
- * top bar + big status glyph, the royal-italic officer line under the card,
- * Remarks rows for rejected/returned, and the blue "eye" chips for the
- * Tax Order of Payment / issued Business Permit.
+ * Application status page, trimmed to what only it does (client, 10 November
+ * 2026: "not that important… it has links/buttons that can be accessed
+ * anywhere, making it only a redundant page").
+ *
+ * It cannot go: it holds the only Fix-and-resubmit flow, and notifications,
+ * emails, Track's "Fix and resubmit", PayPage's "Back to application" and the
+ * wizard's "Track this application" all land here. So it keeps a compact
+ * status line, the officers in charge, the amendment's changes, the
+ * correction dialog and remarks, the return history and Re-apply.
+ *
+ * What went, and where it still lives (git history has every piece):
+ *  - the Tax Order of Payment dialog and Pay Online → Track and
+ *    /applications/:id/pay; a one-line "Pay online" link stays while unpaid
+ *  - the issued permits' view/download chips → My Permits (one link here)
+ *  - the LGU Clearances card → Track and /applications/:id/clearances
+ *  - "Inspections by office" and the next-visit date → Track's permit rows
+ *  - the read-only copies of the office forms (checklist item 24) → the
+ *    clearance stage's "View submitted form"
+ *  - the Messages thread → /messages?application=…, linked from the officer
+ *    list
+ * The big prototype StatusCards (PDF p50–58) went with them: one badge, the
+ * same `filingStatusMeta` chip Track wears, says the status now.
  */
-
-function HourglassIcon({ size = 44 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="10" strokeDasharray="55 8" />
-      <path d="M9 7h6M9 17h6M9.5 7c0 2.2 1 3.4 2.5 4.4 1.5-1 2.5-2.2 2.5-4.4M9.5 17c0-2.2 1-3.4 2.5-4.4 1.5 1 2.5 2.2 2.5 4.4" />
-    </svg>
-  )
-}
-
-function MagnifierCheckIcon({ size = 44 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="13.5" cy="9.5" r="6" />
-      <path d="M4 21l5.2-6.4" />
-      <path d="M11 9.6l1.8 1.8 3.2-3.4" />
-    </svg>
-  )
-}
-
-function CheckRingIcon({ size = 44 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="10" />
-      <path d="M7.5 12.3l3 3 5.8-6.2" />
-    </svg>
-  )
-}
 
 function AvatarGlyph({ size = 30 }: { size?: number }) {
   return (
@@ -90,294 +68,6 @@ function MessageIcon({ size = 26 }: { size?: number }) {
   )
 }
 
-/**
- * Where each office has got to, one row per office (the client's first request).
- *
- * "Once a sub-permit is already approved/done for inspection for a business,
- * but the other sub-permits are not yet approved/done, still display those that
- * are approved/done already." The tracking list answers that with a chip per
- * permit type; this is where the detail behind the chip has to live, because
- * the status card above can only ever describe the filing as a whole and the
- * filing as a whole is exactly what is NOT finished.
- *
- * Two things this section is careful about.
- *
- * It shows the CURRENT visit per office and no other. A failed visit is kept on
- * the record rather than overwritten, so an office awaiting a re-inspection has
- * two rows on this payload and only the newer one is its standing —
- * Inspection::scopeCurrentPerDepartment on the API means the same thing by the
- * word, and it is the predicate recordInspection() uses to decide the filing
- * has cleared. Listing both would show an applicant a failure the office has
- * already moved past.
- *
- * And it never says "issued". Every label here is the API's own
- * (`result_label`, `status_label`), which describes a VISIT: Passed, Failed,
- * Passed with conditions, Scheduled. No permit exists until every office's
- * current visit has passed and approveAndIssue() writes them, and this list
- * sits under a sentence that says so rather than leaving an applicant to infer
- * it from four green rows and a fifth that is still pending.
- */
-function OfficeVisits({ app }: { app: Application }) {
-  /*
-   * Highest id per department. `reduce` rather than a sort, because the payload
-   * carries no ordering guarantee for this relation and taking `[0]` of a
-   * filtered list is how the status card above once ended up announcing a
-   * scheduled date that had already passed.
-   */
-  const current = new Map<string, Application['inspections'][number]>()
-  for (const visit of app.inspections) {
-    const code = visit.department?.code
-    // No department on the row means the response was not asked to load it,
-    // and a visit that cannot say whose it is has nothing to contribute to a
-    // list whose entire structure is "one row per office".
-    if (!code) continue
-    const held = current.get(code)
-    if (!held || visit.id > held.id) current.set(code, visit)
-  }
-
-  const visits = [...current.values()].sort((a, b) =>
-    (a.department?.name ?? '').localeCompare(b.department?.name ?? ''),
-  )
-  if (visits.length === 0) return null
-
-  const outstanding = visits.filter((v) => !v.conducted_at || !v.result).length
-
-  return (
-    <section className="mt-8 rounded-2xl bg-white px-6 py-5 shadow-card">
-      <h2 className="text-lg font-bold text-ink">Inspections by office</h2>
-      <p className="mt-1 text-sm text-ink-secondary">
-        {/*
-          * Three states, not two. "Your permits are issued once the last result
-          * is recorded" is a promise about the future, and it was still on
-          * screen on a filing whose permits already exist — on the same page as
-          * the card offering them for download. Told on the data rather than on
-          * the status: `permits` is the thing the sentence is about, and it is
-          * non-empty exactly when approveAndIssue has run. The forward-looking
-          * wording survives for the gap between the last passing visit and the
-          * permits being written, which is the only moment it was ever true.
-          *
-          * The last two said the permits wait on EVERY office, which stopped
-          * being true when each clearance became its own approval: one office
-          * issues its certificate on its own result (tester, 5 October 2026;
-          * docs/application-flow-2026-09.md).
-          */}
-        {outstanding === 0 && app.permits.length > 0
-          ? 'Every office has been, and your permits are issued — they are on this page and in your Profile.'
-          : outstanding === 0
-          ? 'Every office has been. Each permit is issued once its office records the result.'
-          : `${
-              outstanding === 1 ? 'One office has' : `${outstanding} offices have`
-            } still to inspect. Each permit is issued by its own office after its visit.`}
-      </p>
-      <ul className="mt-4 space-y-2">
-        {visits.map((visit) => {
-          /*
-           * The API's words, not ours. `result_label` already distinguishes
-           * "Passed" from "Passed with conditions", and a second vocabulary
-           * written here would drift from the officer's screen the first time
-           * the enum gained a case.
-           */
-          const done = Boolean(visit.conducted_at && visit.result)
-          const failed = visit.result === 'failed'
-          const label = done ? (visit.result_label ?? 'Recorded') : visit.status_label
-          const when = done ? visit.conducted_at : visit.scheduled_at
-
-          return (
-            <li
-              key={visit.id}
-              className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-line px-4 py-3"
-            >
-              <span className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">
-                {visit.department?.name ?? 'Inspecting office'}
-              </span>
-              <span className="shrink-0 text-xs italic text-ink-muted">
-                {done ? 'Visited' : 'Scheduled'} {formatDateTime(when)}
-              </span>
-              {/*
-                Icon plus word: the three outcomes must not rest on colour.
-
-                ── And the colours come from TONE_CLASSES now ─────────────────
-
-                They were written here — `bg-s-red-tint text-s-red`,
-                `bg-s-green-tint text-s-green`, `bg-s-yellow-tint
-                text-amber-800` — a fourth palette for three facts the shared
-                table already names: `danger`, `success` and `scheduled`. Two
-                of the three were not even the same colour as their counterpart
-                (`danger` is `bg-red-50 text-red-700`; `text-amber-800` is
-                Tailwind's, and `--color-*: initial` means it resolves to
-                nothing in this build, so that word was rendering unstyled).
-
-                The client, 17 September 2026: *"I told you to match the colors
-                for the same status. Do this for ALL, even those that are not
-                captured by the screenshot I sent."* A failed visit and a
-                rejected permit are the same news to the person reading it, and
-                a scheduled visit is the same yellow the permit wears while it
-                waits for one.
-
-                The border comes with the tone, so it is added here — the tones
-                are written for bordered badges and a tint without one sits
-                differently against a tinted card.
-              */}
-              <span
-                className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold ${
-                  TONE_CLASSES[failed ? 'danger' : done ? 'success' : 'scheduled']
-                }`}
-              >
-                {failed ? (
-                  <XCircleIcon size={14} strokeWidth={2} />
-                ) : done ? (
-                  <CheckCircleIcon size={14} />
-                ) : (
-                  <CalendarIcon size={14} />
-                )}
-                {label}
-              </span>
-            </li>
-          )
-        })}
-      </ul>
-    </section>
-  )
-}
-
-/** Royal "eye" chip (👁 Tax Order of Payment / 👁 Business Permit). */
-function EyeChip({
-  label,
-  onClick,
-  to,
-  className = '',
-}: {
-  label: string
-  onClick?: () => void
-  to?: string
-  /** Layout only. Used by the issued-permits list to make a column of chips
-      one width instead of a ragged stack of intrinsic ones. */
-  className?: string
-}) {
-  const inner = (
-    <>
-      <EyeIcon size={20} />
-      <span className="truncate underline underline-offset-4">{label}</span>
-    </>
-  )
-  const cls =
-    `inline-flex items-center gap-2.5 bg-royal px-6 py-2.5 text-base font-medium text-white transition-colors hover:bg-royal-hover ${className}`
-  return to ? (
-    <Link to={to} className={cls}>
-      {inner}
-    </Link>
-  ) : (
-    <button type="button" onClick={onClick} className={cls}>
-      {inner}
-    </button>
-  )
-}
-
-/** Tax Order of Payment overlay (p51 card language). */
-function FeeDialog({ app, onClose }: { app: Application; onClose: () => void }) {
-  const fee = app.fee_assessment
-  const panelRef = useRef<HTMLDivElement>(null)
-  const openerRef = useRef<HTMLElement | null>(null)
-
-  /*
-   * This dialog announced itself as aria-modal but behaved like a panel: focus
-   * stayed on the button behind it, Tab walked straight out into the page it
-   * was covering, and Escape did nothing — so a keyboard user could open their
-   * Tax Order of Payment and have no way to close it. ProtoModal already does
-   * this properly; this one is hand-rolled, so it has to do it itself.
-   */
-  useEffect(() => {
-    openerRef.current = document.activeElement as HTMLElement | null
-    panelRef.current?.focus()
-
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        event.stopPropagation()
-        onClose()
-        return
-      }
-      if (event.key !== 'Tab') return
-      const panel = panelRef.current
-      if (!panel) return
-      const focusable = panel.querySelectorAll<HTMLElement>(
-        'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      )
-      // Nothing to cycle between: keep focus on the panel rather than letting
-      // it fall through to the page underneath.
-      if (focusable.length === 0) {
-        event.preventDefault()
-        panel.focus()
-        return
-      }
-      const first = focusable[0]
-      const last = focusable[focusable.length - 1]
-      const active = document.activeElement
-      if (event.shiftKey && (active === first || active === panel)) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && active === last) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-
-    document.addEventListener('keydown', onKeyDown, true)
-    return () => {
-      document.removeEventListener('keydown', onKeyDown, true)
-      // Put the user back where they were, not at the top of the document.
-      openerRef.current?.focus?.()
-    }
-  }, [onClose])
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-      onClick={onClose}
-    >
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Tax Order of Payment"
-        tabIndex={-1}
-        className="w-full max-w-xl rounded-md bg-white px-8 py-7 shadow-overlay focus:outline-none"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-start justify-between">
-          <h2 className="text-xl font-bold text-ink">Tax Order of Payment</h2>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-ink-secondary hover:text-ink">
-            <XIcon size={20} />
-          </button>
-        </div>
-        <p className="display-serif mt-4 text-lg text-ink">
-          {/* The bill's own number, not the tracking ID; a dash until a bill exists. */}
-          Reference No: <span className="tnum ml-3">{fee?.reference_number ?? '—'}</span>
-        </p>
-        <div className="display-serif mt-5 flex items-baseline justify-between border-b border-ink/40 pb-2 text-lg text-ink">
-          <span>Description</span>
-          <span>Charge</span>
-        </div>
-        <div className="mt-3 max-h-[50vh] overflow-y-auto pr-1">
-          <TaxOrderBreakdown fee={fee} />
-        </div>
-        <div className="display-serif mt-6 flex items-baseline justify-between border-t border-ink/40 pt-4 text-2xl text-ink">
-          <span>Total Amount:</span>
-          {/*
-            No assessment is not a bill for nothing. "₱0.00" here reads as
-            "you owe nothing", which is the opposite of "the offices have not
-            worked out what you owe yet".
-          */}
-          {fee ? (
-            <span className="tnum">{formatMoney(fee.total_amount)}</span>
-          ) : (
-            <span className="text-base text-ink-muted">Not assessed yet</span>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 export function ApplicationDetailPage() {
   const { id = '' } = useParams()
   const appId = Number(id)
@@ -398,21 +88,6 @@ export function ApplicationDetailPage() {
    * read the rest of the filing, and reopened from the card below.
    */
   const [correctionsOpen, setCorrectionsOpen] = useState(true)
-  /*
-   * The sheets the applicant handed to the five offices (checklist item 24).
-   *
-   * Fetched unconditionally rather than behind the section's `status !==
-   * 'draft'` guard: a hook cannot be called conditionally, and a draft simply
-   * comes back with nothing saved. `officeForms.list` carries `form_data` and
-   * the zoning checklist together, which is everything OfficeFormSheet needs to
-   * render what was submitted.
-   */
-  const { data: submittedForms } = useAsync<OfficeForm[]>(
-    () => officeForms.list(appId),
-    [appId],
-  )
-
-  const [showFees, setShowFees] = useState(false)
   const [action, setAction] = useState<'resubmit' | 'cancel' | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
@@ -455,24 +130,9 @@ export function ApplicationDetailPage() {
   /* Every row is applied in one transaction, so the first date is the date. */
   const changesAppliedAt = (app.requested_changes ?? []).find((c) => c.applied_at)?.applied_at ?? null
   /*
-   * The visit the applicant should be getting ready for.
-   *
-   * Pending ones first, soonest first. A filing carries one visit per inspecting
-   * office, and now a second visit for any office that failed the first — the
-   * failed visit is kept on the record rather than overwritten, so a filing that
-   * is waiting on a re-inspection holds both. Taking the first row with a date
-   * meant reading the OLDEST of them, which after a re-inspection is a visit
-   * that has already happened: the card announced "Scheduled Date" as a day in
-   * the past while somebody was booked to come next Tuesday.
-   *
-   * The last two fallbacks are the old behaviour, for a filing whose visits have
-   * all been conducted — there is nothing upcoming to name, and a date already
-   * gone still tells the applicant which visit the office is deciding on.
+   * The next-visit date ("Next inspection: …") was read here and is gone with
+   * the visits list (client, 10 November 2026); Track's permit rows carry it.
    */
-  const upcoming = app.inspections
-    .filter((i) => i.scheduled_at && !i.conducted_at)
-    .sort((a, b) => (a.scheduled_at ?? '').localeCompare(b.scheduled_at ?? ''))
-  const inspection = upcoming[0] ?? app.inspections.find((i) => i.scheduled_at) ?? app.inspections[0]
   const withRemarks = status === 'rejected' || status === 'returned'
   /* Shared with the officer's progress rail so the two cannot count differently. */
   const otherPermits = otherPermitProgress(app.permit_types)
@@ -628,9 +288,120 @@ export function ApplicationDetailPage() {
    */
   const taken = handling.some((row) => row.officer !== null || row.withheld)
 
+  /*
+   * ── The status line (client, 10 November 2026) ──────────────────────────
+   *
+   * One badge and one sentence instead of a 4xl prototype card per status.
+   * The badge is `filingStatusMeta`, the chip Track draws on the same filing,
+   * so the two screens cannot name it differently: a filing still gathering
+   * its other permits reads "Approved", a decided one "Completed".
+   *
+   * The sentence is what the badge cannot say, and the only links left are the
+   * one next step each status has: pay, apply for the outstanding clearances,
+   * or find the issued permits. Everything they point at lives elsewhere.
+   */
+  const meta = filingStatusMeta(app)
+  const gathering = isGatheringOtherPermits(app)
+  const inlineLink = 'font-semibold text-royal underline underline-offset-2 hover:text-royal-hover'
+  /* Built only on the branches that use it, which are the ones with permits. */
+  const permitsLink = () => (
+    <Link to="/permits" className={inlineLink}>
+      {app.permits.length > 1 ? 'See them in My Permits' : 'See it in My Permits'}
+    </Link>
+  )
+
+  let note: ReactNode = null
+  if (status === 'draft') {
+    note = 'This application has not been submitted yet.'
+  } else if (status === 'returned') {
+    note = 'Fix the remarks below, then resubmit. Your tracking ID stays the same.'
+  } else if (isPayment) {
+    note = (
+      <>
+        Your Tax Order of Payment is ready.{' '}
+        <Link to={`/applications/${app.id}/pay`} className={inlineLink}>
+          Pay online
+        </Link>
+      </>
+    )
+  } else if (status === 'for_approval') {
+    /*
+     * BPLO reads the form first, and only then is there anything to pay. Not
+     * on an amendment: no fee is assessed on one — it joins the next renewal
+     * (docs/amendment-2026-09-19.md §3; tester, 5 October 2026). A new
+     * filing's other permits are BPLO's to list here since 5 October 2026
+     * (client: "BPLO decides, no rules").
+     */
+    note = isAmendment
+      ? 'BPLO is reading your amendment.'
+      : app.application_type === 'annual_inspection'
+        ? // Opened by the system, not filed (client, 20 October 2026).
+          'Your Occupancy Permit is due for its yearly inspection. OBO will set the date. There is no fee.'
+        : app.application_type === 'new'
+          ? 'BPLO is reading your form and will list the other permits you need. Your fees are assessed once it is approved.'
+          : 'BPLO is reading your form. Your fees are assessed once it is approved.'
+  } else if (gathering) {
+    /*
+     * The "N of M other permits approved" count lives here and on no other
+     * owner screen in this form — Track's badge counts every permit, the
+     * Business Permit included (`otherPermitProgress` vs its `rows`). The
+     * Business Permit is released at payment (24 September 2026), and a
+     * rejected clearance suspends it, so both are said.
+     */
+    note =
+      otherPermits.outstanding.length === 0 ? (
+        <>
+          Your Business Permit is issued, and all {otherPermits.total} other permits are
+          approved. {permitsLink()}
+        </>
+      ) : (
+        <>
+          Your Business Permit is issued. {otherPermits.approved} of {otherPermits.total} other
+          permits approved · still to come: {otherPermits.outstanding.join(', ')}. Apply for each
+          one in{' '}
+          <Link to={`/applications/${app.id}/clearances`} className={inlineLink}>
+            LGU Clearances
+          </Link>
+          . If one is rejected or fails its inspection, your Business Permit is suspended until
+          it is settled.
+        </>
+      )
+  } else if (status === 'for_final_approval') {
+    note = 'BPLO is finishing your application. Nothing is needed from you.'
+  } else if (status === 'approved' || status === 'issued') {
+    note =
+      app.permits.length > 0
+        ? permitsLink()
+        : 'Your permits are being issued. They will appear in My Permits shortly.'
+  }
+
+  /*
+   * ── An amendment that carries ZONING ────────────────────────────────────
+   *
+   * Was its own "LGU Clearances" card, marked required; one sentence now. BPLO
+   * cannot approve the amendment until the Zoning Clearance is issued
+   * (`WorkflowService::approveAmendment`; Ken, 6 October 2026), so it stays on
+   * the page that the filing's notifications open. Any part of the address
+   * counts, as `WorkflowService::amendmentMovesPremises` reads it — the box's
+   * note (`address_details`) changes nothing on the register.
+   */
+  const zoningNote =
+    status !== 'draft' && amendmentNeedsZoning ? (
+      <>
+        {(app.requested_changes ?? []).some(
+          (c) => c.field.startsWith('address_') && c.field !== 'address_details' && c.new_value !== null,
+        )
+          ? 'A new Zoning Clearance is needed for the new address.'
+          : 'A new Zoning Clearance is needed for this change.'}{' '}
+        <Link to={`/applications/${app.id}/clearances`} className={inlineLink}>
+          Apply for it here.
+        </Link>
+      </>
+    ) : null
+
   return (
-    <div className="mx-auto max-w-4xl">
-      <div className="mb-8 border-b-2 border-ink/50 pb-2">
+    <div className="mx-auto max-w-3xl">
+      <div className="mb-5 border-b-2 border-ink/50 pb-2">
         <h1 className="text-2xl font-bold text-ink">{app.business.name}</h1>
       </div>
 
@@ -645,282 +416,28 @@ export function ApplicationDetailPage() {
         </div>
       )}
 
-      <h2 className="display-serif mb-5 text-center text-3xl text-ink">
-        {isPayment ? 'Payment Status' : 'Application Status'}
-      </h2>
-
-      <div className="mx-auto max-w-3xl">
-        {/* ── The prototype status card ────────────────────────────────── */}
-        {isPayment && (
-          <StatusCard tone="orange">
-            <div className="flex items-center gap-5 py-2 text-ink">
-              <HourglassIcon />
-              <span className="text-4xl font-medium">Pending</span>
-            </div>
-            <div className="mt-6 flex items-center gap-4">
-              <EyeChip label="Tax Order of Payment" onClick={() => setShowFees(true)} />
-              <button
-                type="button"
-                onClick={() => setShowFees(true)}
-                aria-label="View Tax Order of Payment"
-                className="text-royal hover:text-royal-hover"
-              >
-                <DownloadIcon size={26} />
-              </button>
-            </div>
-            <PillButton className="mt-4" onClick={() => navigate(`/applications/${app.id}/pay`)}>
-              Pay Online
-            </PillButton>
-          </StatusCard>
-        )}
-
-        {/*
-          * ── The three cards between filing and approval ────────────────
-          *
-          * These were two, and both were testing statuses the September flow
-          * change deleted: `submitted`/`under_review` on the first and
-          * `for_inspection` on the second. Neither condition can be true any
-          * more, so an applicant sitting at `for_approval`, the gathering
-          * stage or `for_final_approval` — which is most of
-          * the life of a filing — opened "Application Status" and was shown no
-          * status card at all. The bug was invisible from the officer side,
-          * where the same staleness printed raw enum values instead.
-          */}
-        {status === 'for_approval' && (
-          <StatusCard tone="orange">
-            <div className="flex items-center gap-5 py-2 text-ink">
-              <HourglassIcon />
-              <span className="text-4xl font-medium">For Approval</span>
-            </div>
-            {/*
-              * What this stage IS, said plainly, because the client's whole
-              * correction to the flow was that these two are separate: BPLO
-              * reads the form first, and only then is there anything to pay.
-              * An applicant who remembers the old system expects a bill here.
-              */}
-            {/*
-              Not on an amendment: no fee is assessed on one — it joins the
-              next renewal (docs/amendment-2026-09-19.md §3) — so the second
-              sentence promised a bill that never comes (tester, 5 October 2026).
-            */}
-            <p className="mt-2 text-sm italic text-ink-secondary">
-              {/*
-                A new filing's other permits are BPLO's to list at this
-                stage since 5 October 2026 (client: "BPLO decides, no rules").
-              */}
-              {isAmendment
-                ? 'BPLO is reading your amendment.'
-                : app.application_type === 'annual_inspection'
-                  ? // Opened by the system, not filed (client, 20 October 2026).
-                    'Your Occupancy Permit is due for its yearly inspection. OBO will set the date. There is no fee.'
-                  : app.application_type === 'new'
-                  ? 'BPLO is reading your form and will list the other permits you need. Your fees are assessed once it is approved.'
-                  : 'BPLO is reading your form. Your fees are assessed once it is approved.'}
-            </p>
-            {app.deadline_at && (
-              <p className="mt-3 text-base italic text-ink-secondary">
-                Deadline: {formatDate(app.deadline_at)}
-              </p>
-            )}
-          </StatusCard>
-        )}
-
-        {/*
-          * The stage that replaced For Inspection, and it is not a rename.
-          *
-          * Inspection belongs to ONE permit now, not to the filing, and five
-          * permits move at once — so the honest headline for the applicant is
-          * the set of permits still outstanding, with the next visit named
-          * underneath it when one is booked. This is also the only stage on
-          * this screen where the applicant has work to do, hence the button:
-          * they must apply for each remaining clearance or upload the copy they
-          * already hold, and nothing happens until they do.
-          *
-          * Neither this card nor For Final Approval is an error, so neither
-          * takes #bd0000 (DESIGN.md, Red Means Stop) — yellow for work in
-          * progress, orange for a decision pending, matching the cards that
-          * survived.
-          */}
-        {/*
-          ── The card leads with the permit, since 24 September 2026 ────────
-
-          It led with "Awaiting Other Permits" in 4xl type, which was the
-          status label and was the right thing to shout while the applicant
-          had nothing yet. They have their Mayor's Permit by the time they
-          reach this card now — it is released at payment — so the biggest
-          words on the screen were telling them they were still waiting for
-          the thing in their vault.
-
-          Green rather than yellow for the same reason. Yellow was "work in
-          progress", and the work that remains is real but it is no longer
-          between the applicant and their permit — it is a condition on a
-          permit they hold. The sentence under it carries that, including
-          what a rejection would cost, because a green card that mentioned
-          only good news would be the other half of the same mistake.
-        */}
-        {isGatheringOtherPermits(app) && (
-          <StatusCard tone="green">
-            <div className="flex items-center gap-5 py-2 text-ink">
-              <MagnifierCheckIcon />
-              <span className="text-4xl font-medium">Business Permit Released</span>
-            </div>
-            <p className="mt-2 text-sm italic text-ink-secondary">
-              {otherPermits.outstanding.length === 0
-                ? `Your Business Permit is issued, and all ${otherPermits.total} other permits are approved. Your application is complete.`
-                : `Your Business Permit is issued — download it from your profile. ` +
-                  `${otherPermits.approved} of ${otherPermits.total} other permits approved` +
-                  ` · still to come: ${otherPermits.outstanding.join(', ')}.` +
-                  ' Apply for each one.' +
-                  ' If one is rejected or fails its inspection, your Business Permit is suspended until it is settled.'}
-            </p>
-            {inspection?.scheduled_at && (
-              <p className="mt-3 flex items-center gap-2 text-base italic text-ink-secondary">
-                <CalendarIcon size={18} />
-                Next inspection: {formatDateTime(inspection.scheduled_at)}
-              </p>
-            )}
-            <PillButton className="mt-4" onClick={() => navigate(`/applications/${app.id}/clearances`)}>
-              Go to LGU Clearances
-            </PillButton>
-          </StatusCard>
-        )}
-
-        {/*
-          * A stage with nothing in it for the applicant to do, which is exactly
-          * why it needs saying: every office has finished and the filing is
-          * sitting on one desk. Without a card it read as the same silence as
-          * the bug above.
-          */}
-        {status === 'for_final_approval' && (
-          <StatusCard tone="orange">
-            <div className="flex items-center gap-5 py-2 text-ink">
-              <HourglassIcon />
-              {/*
-                "With BPLO", matching the chip — see `applicationStatusMeta`.
-                The old heading named a stage that is on no guide the
-                applicant can read, and the sentence under it described a
-                wait for copies nobody uploads any more.
-              */}
-              <span className="text-4xl font-medium">With BPLO</span>
-            </div>
-            <p className="mt-2 text-sm italic text-ink-secondary">
-              BPLO is finishing your application. Nothing is needed from you.
-            </p>
-          </StatusCard>
-        )}
-
-        {/*
-          The END card. Gated on the row and not the status since 4 October
-          2026: a paid filing wears `approved` while its other permits come
-          in, and on that filing this card stacked under the
-          Business-Permit-Released card above it — two cards, one saying
-          "apply for your other permits", the next saying the application
-          was done.
-        */}
-        {(status === 'approved' || status === 'issued') && !isGatheringOtherPermits(app) && (
-          <StatusCard tone="green">
-            <div className="flex items-center gap-5 py-2 text-ink">
-              <CheckRingIcon />
-              <span className="text-4xl font-medium">Approved</span>
-            </div>
-            {/*
-              * Every certificate this filing produced, each under its own name.
-              *
-              * This was `app.permits[0]` behind the literal strings "Business
-              * Permit" and "Download Business Permit", and both halves of that
-              * were wrong at once. A filing that asks for seven permit types
-              * issues seven permits — `approveAndIssue` writes one per requested
-              * type in a single transaction — so six of them had no route from
-              * the screen that announced the approval. And `[0]` is whatever
-              * that insert happened to write first, which is the filing's
-              * permit-type order and not a promise about which type leads it:
-              * the first filing whose order puts a clearance ahead of the
-              * Mayor's Permit served a Sanitary Permit under a link that read
-              * "Download Business Permit". A certificate under another
-              * certificate's name is not a wording slip.
-              *
-              * So the name comes from `permit_type.name` — the API's own word
-              * for the document, the same one Profile prints — and never from a
-              * string written here.
-              *
-              * The list is `items-stretch` inside a column that centres its
-              * children, so it takes the width of its widest row and every chip
-              * fills it. With one permit that is the single chip's intrinsic
-              * width, which is exactly what this card showed before; with seven
-              * it is a tidy column instead of a ragged centred stack.
-              */}
-            {app.permits.length > 0 ? (
-              <ul className="mt-6 flex flex-col items-stretch gap-3">
-                {app.permits.map((permit) => {
-                  const typeName = permit.permit_type?.name ?? 'Permit'
-                  /* The permit NUMBER is what makes each link's accessible name
-                     distinct beyond doubt (WCAG 2.1 AA, PRODUCT.md): seven
-                     arrows all announcing "Download" is a list a screen-reader
-                     user cannot choose from, and a renewal can leave two
-                     permits of the same type on one business. It is the same
-                     naming Profile uses for the same documents. */
-                  const name = `${typeName} (${permit.permit_number})`
-                  return (
-                    <li key={permit.id} className="flex items-center gap-4">
-                      <EyeChip
-                        label={typeName}
-                        to={`/permits/${permit.id}`}
-                        className="min-w-0 flex-1"
-                      />
-                      {/* The arrow opens the certificate, where the PDF is
-                          produced — the same destination as the chip beside it,
-                          which is why the two share an href. */}
-                      <Link
-                        to={`/permits/${permit.id}`}
-                        aria-label={`Download the ${name}`}
-                        className="shrink-0 text-royal hover:text-royal-hover"
-                      >
-                        <DownloadIcon size={26} />
-                      </Link>
-                    </li>
-                  )
-                })}
-              </ul>
-            ) : (
-              <p className="mt-3 text-sm italic text-ink-secondary">
-                Your permits are being issued. They will appear here shortly.
-              </p>
-            )}
-          </StatusCard>
-        )}
-
-        {(status === 'rejected' || status === 'cancelled') && (
-          <StatusCard tone="red">
-            <div className="flex items-center gap-5 py-2 text-ink">
-              <XCircleIcon size={44} strokeWidth={1.6} />
-              <span className="text-4xl font-medium">
-                {status === 'cancelled' ? 'Cancelled' : 'Rejected'}
+      <div>
+        <section aria-labelledby="status-heading" className="rounded-xl bg-white px-5 py-4 shadow-card">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <h2 id="status-heading" className="text-sm font-bold uppercase tracking-wide text-ink-muted">
+              {isPayment ? 'Payment Status' : 'Application Status'}
+            </h2>
+            <StatusBadge tone={meta.tone} label={meta.label} icon={meta.icon} />
+            {status === 'for_approval' && app.deadline_at && (
+              <span className="text-sm text-ink-secondary sm:ml-auto">
+                Deadline: <span className="tnum">{formatDate(app.deadline_at)}</span>
               </span>
-            </div>
-          </StatusCard>
-        )}
-
-        {status === 'returned' && (
-          <StatusCard tone="red">
-            <div className="flex items-center gap-5 py-2 text-ink">
-              <XCircleIcon size={44} strokeWidth={1.6} />
-              <span className="text-4xl font-medium">Returned</span>
-            </div>
-            <p className="mt-2 text-sm italic text-ink-secondary">
-              Fix the remarks below, then resubmit. Your tracking ID stays the same.
+            )}
+          </div>
+          {note && <p className="mt-2 text-sm text-ink-secondary">{note}</p>}
+          {zoningNote && (
+            <p className="mt-2 text-sm text-ink-secondary">
+              {zoningNote}
+              <span className="text-s-red" aria-hidden="true"> *</span>
+              <span className="sr-only"> (required)</span>
             </p>
-          </StatusCard>
-        )}
-
-        {status === 'draft' && (
-          <StatusCard tone="orange">
-            <div className="flex items-center gap-5 py-2 text-ink">
-              <HourglassIcon />
-              <span className="text-4xl font-medium">Draft</span>
-            </div>
-            <p className="mt-2 text-sm italic text-ink-secondary">This application has not been submitted yet.</p>
-          </StatusCard>
-        )}
+          )}
+        </section>
 
         {/*
           ── What the amendment changes ──────────────────────────────────
@@ -931,7 +448,7 @@ export function ApplicationDetailPage() {
           the change actually replaced (`old_value`) and the day it landed.
         */}
         {changes.length > 0 && (
-          <section aria-labelledby="changes-heading" className="mt-6 rounded-xl bg-white px-5 py-4 shadow-card">
+          <section aria-labelledby="changes-heading" className="mt-4 rounded-xl bg-white px-5 py-4 shadow-card">
             <h3 id="changes-heading" className="text-sm font-bold uppercase tracking-wide text-ink-muted">
               {changesAppliedAt ? `Changes applied on ${formatDate(changesAppliedAt)}` : 'Changes requested'}
             </h3>
@@ -943,33 +460,26 @@ export function ApplicationDetailPage() {
 
         {/* ── Who is handling it, office by office ─────────────────────── */}
         {/*
-          * A labelled block, not the old right-aligned italic line.
+          * One row per office, the office on the left and the person on the
+          * right — the shape the client asked for (§4: Office / Officer in
+          * Charge) and the one the super admin's register uses. It replaced a
+          * single right-aligned italic line that named one office of six.
           *
-          * That line was built when the screen printed ONE officer, and it read
-          * well as one: "Mr/Ms Liza Reyes - Business Permits and Licensing
-          * Office", tucked under the card. Six of them stacked is a column of
-          * italics with an avatar and a message glyph repeated beside each, and
-          * the one question the applicant actually has — who do I chase about
-          * the fire clearance — has to be answered by scanning it.
-          *
-          * So: a heading that says what the list is, one row per office, the
-          * office on the left and the person on the right. It is also the shape
-          * the client asked for (§4: Office / Officer in Charge), and the shape
-          * the super admin's own register uses, so the two sides of the same
-          * fact read the same way.
+          * The Messages thread that sat at the foot of this page went on
+          * 10 November 2026 (client); the link below is the way to it.
           */}
         {handling.length > 0 && (
-          <section aria-labelledby="handling-heading" className="mt-6 rounded-xl bg-white px-5 py-4 shadow-card">
+          <section aria-labelledby="handling-heading" className="mt-4 rounded-xl bg-white px-5 py-4 shadow-card">
             <h3 id="handling-heading" className="text-sm font-bold uppercase tracking-wide text-ink-muted">
               Officer in charge
             </h3>
-            <ul className="mt-3 divide-y divide-line">
+            <ul className="mt-2 divide-y divide-line">
               {handling.map((row) => (
-                <li key={row.key} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2">
+                <li key={row.key} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-1.5">
                   <span className="text-sm font-semibold text-ink">{row.office}</span>
                   {row.officer ? (
-                    <span className="flex items-center gap-2 text-[15px] text-royal">
-                      <AvatarGlyph />
+                    <span className="flex items-center gap-2 text-sm text-royal">
+                      <AvatarGlyph size={22} />
                       <span className="font-semibold">{row.officer}</span>
                     </span>
                   ) : (
@@ -986,207 +496,20 @@ export function ApplicationDetailPage() {
                 </li>
               ))}
             </ul>
-            <p className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-muted">
-              <span>
-                Each office reviews its own part of your application, so they are taken up
-                separately.
-              </span>
-              {/*
-                * A real way through, not the word "Messages" in a sentence. The
-                * conversation is keyed by FILING and carries an office picker
-                * inside it, so one link is right here — a link per office would
-                * be six links to the same screen.
-                */}
-              {taken && (
-                <Link
-                  to={`/messages?application=${app.id}`}
-                  className="inline-flex items-center gap-1.5 font-semibold text-royal hover:underline"
-                >
-                  <MessageIcon size={16} />
-                  Message an office about this application
-                </Link>
-              )}
-            </p>
-          </section>
-        )}
-
-        {/* ── Per-office inspection progress ────────────────────────────
-          *
-          * Not gated on `status === 'for_inspection'`. It renders whenever the
-          * filing has visits on it, which is the honest condition: the client
-          * asked to see the offices that are done while others are not, and the
-          * moment the last one passes the filing flips to approved — gating on
-          * the status would make the completed record vanish at exactly the
-          * point somebody wants to check what happened. It also keeps the
-          * outcome of a failed visit on screen while a re-inspection is booked.
-          */}
-        {status !== 'draft' && <OfficeVisits app={app} />}
-
-        {/* ── LGU Clearances · the stage after this filing is paid for ───
-          *
-          * A stage still to come, which is what it was before 4 August and is
-          * again. This block briefly described a decision already made in the
-          * wizard ("every one you chose is billed on this filing"), and both
-          * halves of that are now false: nothing is chosen in the wizard, and
-          * nothing is billed until the applicant applies here.
-          *
-          * So the link is forward-looking, and the sentence says the two things
-          * an applicant cannot work out from the filing itself — that applying
-          * costs money, and that the balance is what holds their permit.
-          *
-          * Shown on a rejected or cancelled filing too, because that screen has
-          * a specific sentence for each ("file a new application if you still
-          * need these clearances") and a link that quietly disappears when a
-          * filing fails teaches nothing.
-          *
-          * Not shown on a draft, and the reason has changed with the flow. It
-          * used to be that a draft belonged in the wizard where the cards were
-          * editable. Now it is that a draft has not been submitted, let alone
-          * paid, so the stage is two events away — and pointing at a locked
-          * screen from the one page where the applicant still has work to do
-          * would be sending them away from it.
-          */}
-        {/*
-          ── On an amendment, only when it carries ZONING ───────────────────
-
-          The card told every amendment its clearances open "once BPLO
-          approves … and you have paid … covers all five". An amendment pays
-          nothing and carries no clearance — except a new Zoning Clearance
-          when the address changes or the trade or area grows, which opens the
-          moment it is submitted (tester, 5 October 2026). So that case gets
-          one sentence and the link, and every other amendment no card.
-        */}
-        {status !== 'draft' && amendmentNeedsZoning && (
-          <section className="mt-8 rounded-2xl bg-white px-6 py-5 shadow-card">
             {/*
-              Marked required the way every required field is (FieldLabel's
-              red asterisk and its "(required)" for screen readers): BPLO
-              cannot approve this amendment until the Zoning Clearance is
-              issued (`WorkflowService::approveAmendment`). Ken, 6 October 2026.
-            */}
-            <h2 className="text-lg font-bold text-ink">
-              LGU Clearances
-              <span className="text-s-red" aria-hidden="true"> *</span>
-              <span className="sr-only"> (required)</span>
-            </h2>
-            <p className="mt-1 text-sm text-ink-secondary">
-              {/*
-                Any part of the address, as the rule that attached ZONING
-                reads it (`WorkflowService::amendmentMovesPremises`) — not
-                the pin alone, since 6 October 2026. The box's note
-                (`address_details`) changes nothing on the register.
+              * One link, not one per office: the conversation is keyed by
+              * FILING and carries an office picker inside it.
               */}
-              {(app.requested_changes ?? []).some(
-                (c) => c.field.startsWith('address_') && c.field !== 'address_details' && c.new_value !== null,
-              )
-                ? 'A new Zoning Clearance is needed for the new address.'
-                : 'A new Zoning Clearance is needed for this change.'}{' '}
+            {taken && status !== 'draft' && (
               <Link
-                to={`/applications/${app.id}/clearances`}
-                className="font-semibold text-royal underline underline-offset-2 hover:text-royal-hover"
+                to={`/messages?application=${app.id}`}
+                aria-label="Message an office about this application"
+                className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-royal hover:underline"
               >
-                Apply for it here.
+                <MessageIcon size={16} />
+                Message
               </Link>
-            </p>
-          </section>
-        )}
-        {status !== 'draft' && !isAmendment && (
-          <section className="mt-8 rounded-2xl bg-white px-6 py-5 shadow-card">
-            <h2 className="text-lg font-bold text-ink">LGU Clearances</h2>
-            {/*
-              Two corrections. They open on PAYMENT, not on submission —
-              `ClearanceService::isUnlocked` is `status->isPaid()`, and payment
-              is now itself two steps away from submitting, so "once this
-              application is submitted" would send an applicant to a locked
-              screen with no idea what they were missing. And nothing here adds
-              to a balance any more: the Tax Order of Payment prices all five up
-              front.
-            */}
-            {/*
-              This ended "your Business Permit is released once every one of
-              them is approved", which is not what happens: the permit is
-              issued when the payment clears — see
-              `WorkflowService::releaseOutcomePermit` and its audit note,
-              "Released on payment." The clearance screen carried the same
-              claim and the client caught it there on 29 September 2026.
-            */}
-            {/*
-              "Covers all five" until 5 October 2026: BPLO now lists a new
-              business's other permits when it approves the form, so before
-              that there is no set to name, and after it the bill covers
-              exactly the ones listed.
-            */}
-            <p className="mt-1 text-sm text-ink-secondary">
-              {app.application_type === 'new' && (status === 'for_approval' || status === 'returned')
-                ? 'BPLO lists the ones this business needs when it approves your form. They open once you have paid, and your payment covers them.'
-                : 'These open once BPLO approves this application and you have paid. Each is a separate certificate from its own city office, and your payment covers them.'}
-            </p>
-            <Link
-              to={`/applications/${app.id}/clearances`}
-              className="mt-3 inline-block text-sm font-semibold text-royal underline underline-offset-2 hover:text-royal-hover"
-            >
-              See your LGU Clearances
-            </Link>
-
-            {/*
-              ── The other permits' forms, on the filing (checklist item 24) ──
-              *
-              * "View application form for the other permits are missing. Return
-              * it." They were sheets of this wizard once, so the filing's own
-              * page showed them; they moved onto the clearance stage and this
-              * page kept only a link to it. A `View form` button does exist
-              * there — but it is two screens from the page an applicant opens
-              * to read their application, and what they asked for is to see
-              * their application.
-              *
-              * Read-only and collapsed. The same OfficeFormSheet the applicant
-              * filled in, not a summary of it: a second rendering of the same
-              * answers is a second thing to keep in step with the paper, and
-              * the paper is the point of these sheets.
-              *
-              * Only the sheets with answers on them. An office the applicant
-              * has not applied to yet has an empty form_data, and drawing a
-              * blank statutory form under "what you submitted" would be
-              * claiming they submitted a blank one.
-              */}
-            {(submittedForms ?? [])
-              /*
-               * `form_saved`, never `form_data` being non-empty. The server
-               * derives answers onto every form-bearing sheet whether or not
-               * the applicant has opened it — so emptiness cannot distinguish
-               * "not started" from "started", and filtering on it drew five
-               * blank statutory forms under a heading saying they were
-               * submitted.
-               */
-              .filter((f) => hasOfficeForm(f.permit_type_code) && f.form_saved === true)
-              .map((f) => {
-                // Narrowed by the filter above; repeated for the type, not the logic.
-                if (!hasOfficeForm(f.permit_type_code)) return null
-                const meta = OFFICE_FORM_META[f.permit_type_code]
-                return (
-                  <details
-                    key={f.permit_type_code}
-                    className="mt-4 rounded-xl border border-line bg-paper/40 px-4 py-3"
-                  >
-                    <summary className="cursor-pointer text-sm font-semibold text-ink">
-                      {meta.title}
-                    </summary>
-                    <p className="mt-1 text-xs text-ink-muted">
-                      {meta.kicker} · {meta.ref}
-                    </p>
-                    <div className="mt-4">
-                      <OfficeFormSheet
-                        code={f.permit_type_code}
-                        data={f.form_data as Record<string, string>}
-                        business={carriedOverBusiness(app)}
-                        requirements={f.requirements ?? undefined}
-                        onChange={() => {}}
-                        readOnly
-                      />
-                    </div>
-                  </details>
-                )
-              })}
+            )}
           </section>
         )}
 
@@ -1209,26 +532,29 @@ export function ApplicationDetailPage() {
           not strand somebody with a return they can no longer answer.
         */}
         {!correctionsOpen && (returnedFields.length > 0 || returnedDocuments.length > 0) && (
-          <section className="mt-8">
-            <div className="border-b border-ink/50 pb-2">
-              <h2 className="text-2xl font-bold text-ink">What you need to correct</h2>
-            </div>
-            <div className="mt-5 rounded-xl bg-white px-6 py-5 shadow-card">
-              <p className="text-sm text-ink-secondary">
+          <section
+            aria-labelledby="correct-heading"
+            className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white px-5 py-4 shadow-card"
+          >
+            <div>
+              <h2 id="correct-heading" className="text-sm font-bold uppercase tracking-wide text-ink-muted">
+                What you need to correct
+              </h2>
+              <p className="mt-1 text-sm text-ink-secondary">
                 BPLO returned this application about{' '}
                 {returnedFields.length + returnedDocuments.length === 1
                   ? 'one item'
                   : `${returnedFields.length + returnedDocuments.length} items`}
                 .
               </p>
-              <button
-                type="button"
-                onClick={() => setCorrectionsOpen(true)}
-                className="mt-3 rounded-md bg-royal px-6 py-2.5 text-sm font-semibold text-white shadow-card hover:bg-royal-hover"
-              >
-                Fix and resubmit
-              </button>
             </div>
+            <button
+              type="button"
+              onClick={() => setCorrectionsOpen(true)}
+              className="rounded-md bg-royal px-5 py-2 text-sm font-semibold text-white shadow-card hover:bg-royal-hover"
+            >
+              Fix and resubmit
+            </button>
           </section>
         )}
         {correctionsOpen && (
@@ -1251,15 +577,15 @@ export function ApplicationDetailPage() {
           applicationId={app.id}
           audience="owner"
           refreshKey={`${app.status}|${app.permit_types.map((p) => p.status).join(',')}`}
-          className="mt-8"
+          className="mt-4"
         />
         {/* ── Remarks (p54–55) ─────────────────────────────────────────── */}
         {withRemarks && (
-          <section className="mt-8">
-            <div className="border-b border-ink/50 pb-2">
-              <h2 className="text-2xl font-bold text-ink">Remarks</h2>
-            </div>
-            <ul className="mt-5 space-y-4">
+          <section aria-labelledby="remarks-heading" className="mt-4">
+            <h2 id="remarks-heading" className="text-sm font-bold uppercase tracking-wide text-ink-muted">
+              Remarks
+            </h2>
+            <ul className="mt-2 space-y-3">
               {(remarks.length > 0
                 ? remarks
                 : [
@@ -1273,7 +599,7 @@ export function ApplicationDetailPage() {
               ).map((r, i) => (
                 <li
                   key={i}
-                  className="flex flex-wrap items-baseline gap-x-8 gap-y-1 rounded-xl bg-white px-6 py-4 shadow-card"
+                  className="flex flex-wrap items-baseline gap-x-6 gap-y-1 rounded-xl bg-white px-5 py-3 shadow-card"
                 >
                   <span className="text-sm italic text-ink-muted underline underline-offset-2">{r.who}:</span>
                   {/*
@@ -1325,7 +651,7 @@ export function ApplicationDetailPage() {
                 </li>
               ))}
             </ul>
-            <div className="mt-5 flex justify-end">
+            <div className="mt-3 flex justify-end">
               {/*
                 ── The bare Resubmit is withheld while fields are open ────
 
@@ -1368,33 +694,44 @@ export function ApplicationDetailPage() {
           </section>
         )}
 
-        {/* ── Compact secondary timeline ───────────────────────────────── */}
+        {/*
+          ── Compact secondary timeline ─────────────────────────────────────
+
+          Folded shut since 10 November 2026 (client: trim this page). Track
+          draws each permit's own history; this is the filing's, and the one
+          place a whole-filing record is kept, so it stays one line until
+          opened.
+        */}
         {(timeline?.length ?? 0) > 0 && (
-          <section className="mt-10">
-            <p className="mb-3 text-xs font-bold uppercase tracking-wide text-ink-muted">History</p>
-            <ol className="space-y-2.5 rounded-2xl bg-white px-6 py-5 shadow-card">
-              {/*
-                Named per filing, not per status: the payment row of a filing
-                still gathering its other permits is "Approved", not the
-                status table's "Completed". See `labelHistory`.
-              */}
-              {labelHistory(timeline ?? [], app).reverse().map(({ entry, to }, i) => {
-                return (
-                  <li key={`${entry.to_status}-${entry.created_at}-${i}`} className="flex items-baseline gap-3">
-                    <span
-                      className={`h-2 w-2 shrink-0 translate-y-[-1px] rounded-full ${
-                        i === 0 ? 'bg-royal' : 'bg-line'
-                      }`}
-                    />
-                    <span className="text-sm font-semibold text-ink">{to}</span>
-                    <span className="text-xs text-ink-muted">
-                      {formatDateTime(entry.created_at)}
-                      {entry.changed_by ? ` · ${entry.changed_by.name}` : ''}
-                    </span>
-                  </li>
-                )
-              })}
-            </ol>
+          <section className="mt-4">
+            <details className="rounded-xl bg-white px-5 py-3 shadow-card">
+              <summary className="cursor-pointer text-xs font-bold uppercase tracking-wide text-ink-muted">
+                History
+              </summary>
+              <ol className="mt-3 space-y-2">
+                {/*
+                  Named per filing, not per status: the payment row of a filing
+                  still gathering its other permits is "Approved", not the
+                  status table's "Completed". See `labelHistory`.
+                */}
+                {labelHistory(timeline ?? [], app).reverse().map(({ entry, to }, i) => {
+                  return (
+                    <li key={`${entry.to_status}-${entry.created_at}-${i}`} className="flex items-baseline gap-3">
+                      <span
+                        className={`h-2 w-2 shrink-0 translate-y-[-1px] rounded-full ${
+                          i === 0 ? 'bg-royal' : 'bg-line'
+                        }`}
+                      />
+                      <span className="text-sm font-semibold text-ink">{to}</span>
+                      <span className="text-xs text-ink-muted">
+                        {formatDateTime(entry.created_at)}
+                        {entry.changed_by ? ` · ${entry.changed_by.name}` : ''}
+                      </span>
+                    </li>
+                  )
+                })}
+              </ol>
+            </details>
           </section>
         )}
 
@@ -1413,13 +750,7 @@ export function ApplicationDetailPage() {
           button was missing from the two states where a filing is actually
           abandoned.
         */}
-
-        {/* ── Messages thread (v2) ─────────────────────────────────────── */}
-        {status !== 'draft' && taken && <MessagesPanel applicationId={app.id} />}
       </div>
-
-      {showFees && <FeeDialog app={app} onClose={() => setShowFees(false)} />}
-
     </div>
   )
 }

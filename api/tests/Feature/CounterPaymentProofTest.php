@@ -25,8 +25,9 @@ use Illuminate\Support\Facades\Storage;
  * Ken's rules: at least one of (OR number + date paid) or the photo; both
  * allowed; the date paid cannot be in the future; the photo takes what a
  * requirement takes (PDF, JPG or PNG, up to 10 MB); sending it does NOT mark
- * the bill paid; sending again before BPLO confirms replaces the pending proof
- * and keeps the old one; every submission is audited.
+ * the bill paid; every submission is audited. One receipt waits for BPLO at a
+ * time (client, 10 November 2026): a second send while one is pending is
+ * refused, and the owner may send again only once BPLO rejects it.
  *
  * And BPLO hears of it in the bell, "Proof of payment received" (the tests at
  * the end): the officer holding the filing at BPLO, or every BPLO officer when
@@ -179,7 +180,7 @@ it('takes the files a requirement takes and no others', function () {
         ->assertCreated();
 });
 
-it('replaces the pending proof on a second send, keeping the first with its file and its audit', function () {
+it('refuses a second proof while the first is with BPLO, keeping the first as it was', function () {
     $filing = otcProofFiling();
 
     $first = otcSendProof($filing, [
@@ -187,31 +188,59 @@ it('replaces the pending proof on a second send, keeping the first with its file
         'or_date' => now()->subDays(2)->toDateString(),
         'photo' => UploadedFile::fake()->createWithContent('first.pdf', OTC_PROOF_PDF),
     ])->assertCreated()->json('data.id');
+    $filesBefore = Storage::disk('local')->allFiles();
 
-    $second = otcSendProof($filing, ['or_number' => '2222222', 'or_date' => now()->subDay()->toDateString()])
-        ->assertCreated()
-        ->json('data.id');
+    // Refused whatever it holds: an OR, a photo, or nothing at all.
+    foreach ([
+        ['or_number' => '2222222', 'or_date' => now()->subDay()->toDateString()],
+        ['photo' => UploadedFile::fake()->createWithContent('second.pdf', OTC_PROOF_PDF)],
+        [],
+    ] as $fields) {
+        otcSendProof($filing, $fields)
+            ->assertStatus(422)
+            ->assertJsonPath('errors.proof.0', 'Your receipt is already with BPLO.');
+    }
 
-    $old = PaymentProof::findOrFail($first);
-    expect($old->superseded_at)->not->toBeNull()
-        ->and(Storage::disk('local')->exists($old->file_path))->toBeTrue()
-        ->and(AuditLog::where('action', 'payment_proof.submitted')->where('auditable_id', $first)->exists())->toBeTrue();
+    // Nothing kept: no row, no file, no audit; the first is untouched.
+    expect(PaymentProof::count())->toBe(1)
+        ->and(Storage::disk('local')->allFiles())->toBe($filesBefore)
+        ->and(AuditLog::where('action', 'payment_proof.submitted')->count())->toBe(1);
+    $kept = PaymentProof::findOrFail($first);
+    expect($kept->superseded_at)->toBeNull()
+        ->and($kept->or_number)->toBe('1111111');
 
-    expect(PaymentProof::pendingFor($filing)?->id)->toBe($second);
-    expect(AuditLog::where('action', 'payment_proof.submitted')->where('auditable_id', $second)->firstOrFail()->changes['replaces_proof_id'])
-        ->toBe($first);
+    // Both readers still see the first as the proof waiting on BPLO.
+    foreach (['owner@biztrack.local', 'bplo@biztrack.local'] as $reader) {
+        authAs($reader);
+        test()->getJson("/api/v1/applications/{$filing->id}/payment-proof")
+            ->assertOk()
+            ->assertJsonPath('data.id', $first)
+            ->assertJsonPath('data.or_number', '1111111');
+    }
+});
 
-    // Both readers see the newest one as the proof waiting on BPLO.
-    authAs('owner@biztrack.local');
-    test()->getJson("/api/v1/applications/{$filing->id}/payment-proof")
-        ->assertOk()
-        ->assertJsonPath('data.id', $second)
-        ->assertJsonPath('data.or_number', '2222222');
+it('reads the newest as the one waiting when a filing already holds several pending proofs', function () {
+    $filing = otcProofFiling();
+    $older = otcSendProof($filing, ['or_number' => '1111113', 'or_date' => now()->subDays(2)->toDateString()])
+        ->assertCreated()->json('data.id');
 
-    authAs('bplo@biztrack.local');
-    test()->getJson("/api/v1/applications/{$filing->id}/payment-proof")
-        ->assertOk()
-        ->assertJsonPath('data.id', $second);
+    // A second pending row, as the old replace-on-send era could leave behind.
+    $newer = PaymentProof::create([
+        'application_id' => $filing->id,
+        'fee_assessment_id' => $filing->feeAssessment->id,
+        'submitted_by_user_id' => User::where('email', 'owner@biztrack.local')->value('id'),
+        'or_number' => '2222224',
+        'or_date' => now()->subDay()->toDateString(),
+        'submitted_at' => now()->addSecond(),
+    ])->id;
+
+    expect($older)->not->toBe($newer)
+        ->and(PaymentProof::pendingFor($filing)?->id)->toBe($newer)
+        ->and(PaymentProof::latestFor($filing)?->id)->toBe($newer);
+
+    otcSendProof($filing, ['or_number' => '3333333', 'or_date' => now()->toDateString()])
+        ->assertStatus(422)
+        ->assertJsonPath('errors.proof.0', 'Your receipt is already with BPLO.');
 });
 
 it('refuses proof for a filing BPLO has not billed, in the Pay page’s own words', function () {
@@ -390,15 +419,29 @@ it('tells every active BPLO officer when nobody holds the filing', function () {
     }
 });
 
-it('tells the holder again when the owner replaces the proof before BPLO confirms', function () {
+it('tells the holder once when the owner sends again before BPLO acts, and again after a rejection', function () {
     $filing = otcProofFiling();
     $holder = User::where('email', 'bplo@biztrack.local')->firstOrFail();
     otcHeldBy($filing, $holder);
 
-    otcSendProof($filing, ['or_number' => '1111112', 'or_date' => now()->subDay()->toDateString()])->assertCreated();
-    otcSendProof($filing, ['or_number' => '2222223', 'or_date' => now()->toDateString()])->assertCreated();
+    $first = otcSendProof($filing, ['or_number' => '1111112', 'or_date' => now()->subDay()->toDateString()])
+        ->assertCreated()->json('data.id');
+    otcSendProof($filing, ['or_number' => '2222223', 'or_date' => now()->toDateString()])
+        ->assertStatus(422)
+        ->assertJsonPath('errors.proof.0', 'Your receipt is already with BPLO.');
 
-    expect(otcProofNotices($holder))->toHaveCount(2)
+    expect(otcProofNotices($holder))->toHaveCount(1)
+        ->and(otcProofNotices())->toHaveCount(1);
+
+    // BPLO rejects it: the owner may send a new one, and the holder hears of it.
+    authAs('bplo@biztrack.local');
+    test()->postJson("/api/v1/payment-proofs/{$first}/reject", ['reason' => 'The photo is blurred.'])->assertOk();
+
+    $second = otcSendProof($filing, ['or_number' => '2222223', 'or_date' => now()->toDateString()])
+        ->assertCreated()->json('data.id');
+
+    expect(PaymentProof::pendingFor($filing)?->id)->toBe($second)
+        ->and(otcProofNotices($holder))->toHaveCount(2)
         ->and(otcProofNotices())->toHaveCount(2);
 });
 

@@ -584,7 +584,17 @@ class NotificationService
             // an officer wrote, and with the office's officers when the
             // applicant did. Hard-coding the citizen path sent every officer
             // reply-notification to a screen their token does not reach.
-            $this->filingLink($recipient, $app),
+            //
+            // The officer still goes through filingLink(), to their office's
+            // review, where the filing's thread sits beside the form. The owner
+            // no longer does (client, 10 November 2026): their filing page is
+            // the Application Status page, which does not show the message, so
+            // the notice now opens the conversation itself — MessagesPage reads
+            // `?application=<id>` as the filing's thread. The same permission
+            // filingLink() asks decides which reader is which.
+            $recipient->hasPermission('application.review')
+                ? $this->filingLink($recipient, $app)
+                : "/messages?application={$app->id}",
             $app,
         );
     }
@@ -598,7 +608,11 @@ class NotificationService
             'request',
             'Additional requirement requested',
             "An officer requested: {$request->title} on {$app->tracking_id}.",
-            "/applications/{$app->id}",
+            // Other Requirements, opened on this request (client, 10 November
+            // 2026). It pointed at the Application Status page, which does not
+            // list requirements, so the owner arrived where nothing named what
+            // was asked. Only ever sent to the applicant, so no filingLink().
+            "/requests?request={$request->id}",
             $app,
         );
     }
@@ -694,6 +708,82 @@ class NotificationService
     }
 
     /**
+     * An amendment BPLO was waiting on has its clearance — Approve is open.
+     *
+     * Client, 10 November 2026 ("Waiting for Zoning instead of an error").
+     * Who hears it is `WorkflowService::tellBploAmendmentIsClear`; staff
+     * only, like "New application", and addressed to BPLO's own review.
+     */
+    public function amendmentReadyToApprove(
+        Application $app,
+        User $recipient,
+        ApplicationAssignment $review,
+        PermitType $issued,
+    ): void {
+        $business = $app->business()->withTrashed()->value('name');
+
+        $this->push(
+            $recipient,
+            'status_change',
+            "{$issued->name} issued — ready to approve",
+            "{$app->tracking_id} · {$business} can now be approved.",
+            "/staff/queue/{$review->id}",
+            $app,
+        );
+    }
+
+    /**
+     * The owner handed in a clearance BPLO's amendment approval waits for.
+     *
+     * Client, 10 November 2026: "Zoning Clearance handed in — with CPDO".
+     * Who hears it is `WorkflowService::tellBploOfHandIn`; staff only,
+     * addressed to BPLO's own review.
+     */
+    public function amendmentClearanceHandedIn(
+        Application $app,
+        User $recipient,
+        ApplicationAssignment $review,
+        PermitType $type,
+    ): void {
+        $business = $app->business()->withTrashed()->value('name');
+        $office = $type->department()->value('code') ?? 'its office';
+
+        $this->push(
+            $recipient,
+            'status_change',
+            "{$type->name} handed in — with {$office}",
+            "{$app->tracking_id} · {$business} handed in the {$type->name}.",
+            "/staff/queue/{$review->id}",
+            $app,
+        );
+    }
+
+    /**
+     * The owner has not handed in an amendment's Zoning Clearance sheet.
+     *
+     * Client, 10 November 2026: one reminder, sent by the daily scan
+     * (`ScanPermits`) once the amendment has waited the set number of days.
+     * BPLO cannot approve the amendment until CPDO issues the clearance, and
+     * CPDO has nothing to read until the sheet is in.
+     */
+    public function clearanceNotHandedIn(Application $app, PermitType $type): void
+    {
+        $app->loadMissing('applicant');
+        if (! $app->applicant) {
+            return;
+        }
+
+        $this->push(
+            $app->applicant,
+            'status_change',
+            "Hand in your {$type->name}",
+            "{$app->tracking_id}: BPLO can approve your amendment once the {$type->name} is issued.",
+            "/applications/{$app->id}/clearances",
+            $app,
+        );
+    }
+
+    /**
      * The owner has sent proof of a payment made at the counter.
      *
      * Revision matrix item 4, follow-up: the proof was kept, and BPLO found it
@@ -770,7 +860,9 @@ class NotificationService
             'request',
             'Requirement '.$request->status->label(),
             "Your response to “{$request->title}” on {$app->tracking_id} was {$request->status->label()}.",
-            "/applications/{$app->id}",
+            // The request in Other Requirements, for the reason requestCreated
+            // gives (client, 10 November 2026).
+            "/requests?request={$request->id}",
             $app,
         );
     }

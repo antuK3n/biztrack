@@ -1088,8 +1088,9 @@ export const paymentProofs = {
     unwrap<PaymentProof | null>(api.get(`/applications/${applicationId}/payment-proof`)),
   /**
    * The owner sends proof after paying at the counter: the OR number with the
-   * date paid, a photo of the receipt, or both. Marks nothing paid; a second
-   * send before BPLO confirms replaces the pending one.
+   * date paid, a photo of the receipt, or both. Marks nothing paid. Refused
+   * while one is still pending (client, 10 November 2026); after BPLO
+   * rejects it, a new one is taken.
    */
   send: (applicationId: number, body: { or_number?: string; or_date?: string; photo?: File | null }) => {
     const form = new FormData()

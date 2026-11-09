@@ -158,8 +158,16 @@ class PaymentController extends Controller
                  * profile the estimate was just priced from, so the two lists
                  * cannot describe different businesses. `WorkflowService::
                  * submit` raises the rows that ask for something.
+                 *
+                 * The blank TIN joins it (client, 10 November 2026), on the
+                 * same test submit raises it on, read against the permit set
+                 * submission will attach (set above). The business row is the
+                 * one the wizard saved on leaving the business step.
                  */
-                'other_requirements' => OtherRequirementRules::preview($calculator->facts($application)),
+                'other_requirements' => OtherRequirementRules::preview(
+                    $calculator->facts($application),
+                    WorkflowService::asksForTin($application),
+                ),
             ],
         ]);
     }

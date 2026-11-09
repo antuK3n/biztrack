@@ -22,11 +22,13 @@ use App\Support\AmendmentScope;
 use App\Support\AnnualInspection;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
+use App\Support\ContactRules;
 use App\Support\RenewablePermit;
 use App\Support\RenewalScope;
 use App\Support\RenewalWindow;
 use App\Support\RequiredDocuments;
 use App\Support\ReturnTargets;
+use App\Support\StoreysRequired;
 use App\Support\Tin;
 use App\Support\Zoning\PinZone;
 use Illuminate\Http\JsonResponse;
@@ -785,14 +787,14 @@ class ApplicationController extends Controller
         }
 
         /*
-         * A new owner needs a Surname and a Given Name. Approval replaces the
-         * named owner part by part, all at once (AmendableFields::flush), so a
-         * surname alone would name a business's owner with no first name.
+         * A new owner needs a Surname and a Given Name, as requested rather
+         * than merged with the record — see `ownershipNameRefusal`. The wizard
+         * checks the same on its step (client, 10 November 2026).
          */
         if ($application->application_type === ApplicationType::Amendment) {
+            // Every row: a "none" middle name or suffix (null) counts too.
             $ownerRefusal = AmendableFields::ownershipNameRefusal(
-                $application->requestedChanges()->whereNotNull('new_value')
-                    ->pluck('new_value', 'field')->all(),
+                $application->requestedChanges()->pluck('new_value', 'field')->all(),
             );
 
             if ($ownerRefusal !== null) {
@@ -829,6 +831,18 @@ class ApplicationController extends Controller
             throw ValidationException::withMessages([
                 'documents' => ['Upload: '.$missing->pluck('name')->implode(', ').'.'],
             ]);
+        }
+
+        /*
+         * ── The No. of Storeys is stated (client, 10 November 2026) ──────────
+         *
+         * Business Operation requires it and three office sheets show it
+         * locked; "screen + server", so it is refused here too. After the
+         * documents, so a filing missing both hears about the documents
+         * first, as it always has. See StoreysRequired for who is asked.
+         */
+        if (StoreysRequired::missing($application)) {
+            throw ValidationException::withMessages(['fee_profile.storeys' => [StoreysRequired::MESSAGE]]);
         }
 
         /*
@@ -1006,7 +1020,7 @@ class ApplicationController extends Controller
             ]);
         }
 
-        $this->validateCorrections($sent);
+        $this->validateCorrections($sent, $business);
 
         DB::transaction(function () use ($application, $business, $sent) {
             /*
@@ -1124,21 +1138,61 @@ class ApplicationController extends Controller
      * field is named as that form names it, so the refusal reads the same on
      * both doors. Keep the two in step.
      *
+     * Client, 10 November 2026: the rest of the returnable boxes joined —
+     * the registration number (its shape and the other-owner check), the
+     * names and their lengths, the three numbers and the website. Before
+     * that a correction could store a number or a name the first filing
+     * would have refused. The rules are the business form's own objects
+     * (BusinessController::REGISTRATION_NUMBER_REGEX and
+     * ::registrationNumberUnclaimed, ContactRules), not copies of them.
+     *
      * @param  array<string, string|null>  $sent
      */
-    private function validateCorrections(array $sent): void
+    private function validateCorrections(array $sent, Business $business): void
     {
         $rules = [
             'form:tin' => ['nullable', 'string', 'max:20', 'regex:/^\d{3}-\d{3}-\d{3}(-\d{3,5})?$/'],
             'form:email' => ['nullable', 'email', 'max:255'],
             'form:capital_investment' => ['nullable', 'numeric', 'min:0', 'max:10000000000'],
             'form:capital_participation' => ['nullable', 'numeric', 'min:0', 'max:100'],
+            'form:registration_number' => [
+                'nullable', 'string', 'min:4', 'max:100',
+                BusinessController::REGISTRATION_NUMBER_REGEX,
+                BusinessController::registrationNumberUnclaimed((int) $business->owner_user_id, $business),
+            ],
+            'form:name' => ['nullable', 'string', 'max:255'],
+            'form:trade_name' => ['nullable', 'string', 'max:255'],
+            'form:telephone' => ['nullable', 'string', 'max:40', ContactRules::phone(ContactRules::LANDLINE_MESSAGE)],
+            'form:mobile_number' => ['nullable', 'string', 'max:40', ContactRules::mobile()],
+            'form:website' => ['nullable', 'string', 'max:255', ContactRules::website()],
+            'form:president_officer_name' => ['nullable', 'string', 'max:255', ContactRules::personName()],
+            'form:citizenship' => ['nullable', 'string', 'max:100'],
+            'form:owner_surname' => ['nullable', 'string', 'max:100', ContactRules::personName()],
+            'form:owner_given_name' => ['nullable', 'string', 'max:100', ContactRules::personName()],
+            'form:owner_middle_name' => ['nullable', 'string', 'max:100', ContactRules::personName()],
+            'form:owner_suffix' => ['nullable', 'string', 'max:20', ContactRules::personName()],
+            'form:emergency_contact_name' => ['nullable', 'string', 'max:255'],
+            'form:emergency_contact_number' => ['nullable', 'string', 'max:40', ContactRules::emergencyNumber()],
         ];
         $names = [
             'form:tin' => 'tin',
             'form:email' => 'address.email',
             'form:capital_investment' => 'capital investment',
             'form:capital_participation' => 'capital participation filipino',
+            'form:registration_number' => 'registration number',
+            'form:name' => 'business name',
+            'form:trade_name' => 'trade name',
+            'form:telephone' => 'telephone',
+            'form:mobile_number' => 'mobile number',
+            'form:website' => 'website',
+            'form:president_officer_name' => 'president / officer in charge',
+            'form:citizenship' => 'citizenship',
+            'form:owner_surname' => 'surname',
+            'form:owner_given_name' => 'given name',
+            'form:owner_middle_name' => 'middle name',
+            'form:owner_suffix' => 'suffix',
+            'form:emergency_contact_name' => 'emergency contact person',
+            'form:emergency_contact_number' => 'emergency contact number',
         ];
 
         // The TIN is shaped first, as the business form shapes it before its rule.
@@ -1155,7 +1209,11 @@ class ApplicationController extends Controller
         Validator::make(
             ['fields' => $check],
             collect($present)->mapWithKeys(fn ($rule, $code) => ["fields.{$code}" => $rule])->all(),
-            ['fields.form:tin.regex' => 'Enter a valid TIN: 9 digits, plus a branch code if you have one, like 123-456-789-000.'],
+            [
+                'fields.form:tin.regex' => 'Enter a valid TIN: 9 digits, plus a branch code if you have one, like 123-456-789-000.',
+                'fields.form:registration_number.min' => 'Enter a valid registration number.',
+                'fields.form:registration_number.regex' => 'Enter a valid registration number.',
+            ],
             collect($present)->mapWithKeys(fn ($rule, $code) => ["fields.{$code}" => $names[$code]])->all(),
         )->validate();
     }
@@ -1626,7 +1684,15 @@ class ApplicationController extends Controller
             // 10 against a total of 5 through untested.
             'fee_profile.female_employees' => [...$count, $splitFitsTotal],
             'fee_profile.tax_incentive_grantor' => ['nullable', 'string', 'max:120'],
-            'fee_profile.storeys' => ['nullable', 'integer', 'min:0', 'max:200'],
+            /*
+             * Business Operation's "No. of Storeys", asked again and required
+             * in the wizard since 10 November 2026 (client: "ask once, lock
+             * everywhere") — the CPDD, BFP and OBO sheets show it locked. A
+             * building has at least one storey, so zero is refused (it was
+             * min:0). Nullable like every key here, because drafts autosave
+             * half-typed; the wizard is what holds a filing without it.
+             */
+            'fee_profile.storeys' => ['nullable', 'integer', 'min:1', 'max:200'],
             'fee_profile.doors' => $count,
             'fee_profile.rooms' => $count,
             'fee_profile.beds' => $count,

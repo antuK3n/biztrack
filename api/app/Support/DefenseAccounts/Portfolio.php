@@ -614,6 +614,9 @@ final class Portfolio
             'lines' => [$line],
             ...($renewal ? ['gross_sales' => $gross] : ['capitalization' => $b['capital']]),
             'floor_area_sqm' => $b['floor_area'],
+            // Required since 10 November 2026; the CPDD, BFP and OBO sheets
+            // show it locked, so they no longer post their own.
+            'storeys' => 1,
             'employees' => $b['employees'],
             'employees_in_lgu' => $b['employees'],
             'male_employees' => $male,
@@ -630,7 +633,9 @@ final class Portfolio
         return match ($code) {
             'SANITARY' => [
                 'sanitary_classification' => 'Food Establishment',
-                'water_source' => 'Maynilad',
+                // One of the sheet's own options (OfficeFormRules); Maynilad piped
+                // water is "Level III (Waterworks)" on the list.
+                'water_source' => 'Level III (Waterworks)',
                 'toilets_count' => 1,
                 'operating_hours' => '7:00 AM – 8:00 PM',
             ],
@@ -638,8 +643,8 @@ final class Portfolio
                 'zoning_project_description' => $b['name'],
                 'project_location' => $this->addressLines()[0],
             ],
+            // The storey count comes from the tax profile (OfficeFormAnswers).
             'FSIC' => [
-                'building_storeys' => 1,
                 'total_floor_area_sqm' => $b['floor_area'],
             ],
             /*
@@ -653,11 +658,11 @@ final class Portfolio
                 'project_name' => $b['name'],
                 'project_location' => $this->addressLines()[0],
                 'occupancy_type' => 'Commercial',
-                'building_storeys' => 1,
                 'building_units' => 1,
                 'total_floor_area_sqm' => $b['floor_area'],
                 'building_permit_no' => sprintf('BP-MLB-%s-%04d', CarbonImmutable::now()->subYear()->year, crc32($b['name']) % 10000),
-                'completion_documents' => 'Certificate of Completion, As-built Plans/Specifications',
+                // Documents Submitted is ticked from the uploads since
+                // 10 November 2026 (OfficeFormAnswers::derive); not typed.
                 'completion_submitted_by' => 'Engr. Paolo R. Mendiola',
                 'completion_professional' => 'Civil Engineer',
             ],

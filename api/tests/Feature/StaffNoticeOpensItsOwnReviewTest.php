@@ -142,7 +142,11 @@ it('opens BPLO’s own review from Corrections received', function () {
     expect(ownLatestLink(ownAccount('bplo@biztrack.local'), 'Corrections received'))->toBe("/staff/queue/{$review->id}");
 });
 
-it('keeps an owner’s notices on the citizen site', function () {
+/*
+ * The owner's message notice opens the conversation itself since 10 November
+ * 2026 (client) — still on the citizen site, which is the rule here.
+ */
+it('keeps an owner’s message notice on the citizen site, on the conversation', function () {
     [$app] = ownCrossedFiling();
     takeFiling($app->id, 'BPLO');
 
@@ -152,7 +156,7 @@ it('keeps an owner’s notices on the citizen site', function () {
         'department_id' => ownBplo(),
     ])->assertCreated();
 
-    expect(ownLatestLink(ownAccount('owner@biztrack.local'), 'New message'))->toBe("/applications/{$app->id}");
+    expect(ownLatestLink(ownAccount('owner@biztrack.local'), 'New message'))->toBe("/messages?application={$app->id}");
 });
 
 it('sends an officer whose office has no review of the filing to the queue, never to another filing', function () {

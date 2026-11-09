@@ -31,15 +31,14 @@
             @if($qr)
                 <img src="{{ $qr }}" alt="Verification QR code">
                 <div class="caption">Scan to verify</div>
+                <div class="qr-note">Validity is confirmed only by scanning this QR.</div>
             @endif
         </td>
     </tr>
 </table>
 
 <div class="san-title">SANITARY PERMIT TO OPERATE</div>
-@if($status_label && $status_label !== 'Active')
-    <div class="status">{{ strtoupper($status_label) }}</div>
-@endif
+@include('pdf.partials.status-mark')
 
 <table class="row san-line san-first">
     <tr>

@@ -3,10 +3,12 @@
 use App\Models\Application;
 use App\Models\AuditLog;
 use App\Models\Barangay;
+use App\Models\Business;
 use App\Models\Department;
 use App\Models\OfficerRequest;
 use App\Models\PermitType;
 use App\Models\PsicCode;
+use App\Services\WorkflowService;
 use App\Support\OtherRequirementRules;
 
 /*
@@ -28,6 +30,8 @@ function filingDeclaring(array $flags): Application
         'name' => 'Rules Trading '.random_int(10000, 99999),
         'registration_type' => 'DTI',
         'registration_number' => 'DTI-'.random_int(10000, 99999),
+        // Given, so the blank-TIN requirement (raised at submit) stays out of these counts.
+        'tin' => '123-456-789-000',
         'address' => ['line1' => '5 Rule Street', 'barangay_id' => Barangay::first()->id],
         'lines' => [['psic_code_id' => PsicCode::first()->id, 'capitalization' => 250000]],
     ])->assertCreated()->json('data.id');
@@ -147,6 +151,7 @@ it('hands the wizard the same list beside the fee estimate', function () {
         'name' => 'Preview Trading '.random_int(10000, 99999),
         'registration_type' => 'DTI',
         'registration_number' => 'DTI-'.random_int(10000, 99999),
+        'tin' => '123-456-789-000',
         'address' => ['line1' => '5 Rule Street', 'barangay_id' => Barangay::first()->id],
         'lines' => [['psic_code_id' => PsicCode::first()->id, 'capitalization' => 250000]],
     ])->assertCreated()->json('data.id');
@@ -174,6 +179,59 @@ it('hands the wizard the same list beside the fee estimate', function () {
         ->assertOk()
         ->json('data.other_requirements');
     expect($none)->toBe([]);
+});
+
+/*
+ * Client, 10 November 2026: *"TIN as other requirements is probably
+ * missing."* The wizard's list names the blank TIN, in the words of the
+ * requirement submit raises — and only while item 3 is blank.
+ */
+it('lists the TIN beside the rules only while item 3 is blank', function () {
+    $owner = authAs('owner@biztrack.local');
+    $businessId = test()->withHeaders($owner)->postJson('/api/v1/businesses', [
+        'name' => 'Blank TIN Preview '.random_int(10000, 99999),
+        'registration_type' => 'DTI',
+        'registration_number' => 'DTI-'.random_int(10000, 99999),
+        'address' => ['line1' => '5 Rule Street', 'barangay_id' => Barangay::first()->id],
+        'lines' => [['psic_code_id' => PsicCode::first()->id, 'capitalization' => 250000]],
+    ])->assertCreated()->json('data.id');
+    $appId = test()->withHeaders($owner)->postJson('/api/v1/applications', [
+        'business_id' => $businessId,
+        'data_privacy_consent' => true,
+        'application_type' => 'new',
+        'permit_type_ids' => PermitType::pluck('id')->all(),
+    ])->assertCreated()->json('data.id');
+
+    $blank = test()->withHeaders($owner)
+        ->postJson("/api/v1/applications/{$appId}/fee-preview", [
+            'fee_profile' => ['flags' => ['sells_liquor']],
+        ])
+        ->assertOk()
+        ->json('data.other_requirements');
+
+    // Listed last, with the rules, asked after submit.
+    expect(array_column($blank, 'key'))->toBe(['liquor_permit', OtherRequirementRules::TIN_KEY]);
+    $tin = $blank[1];
+    expect($tin['asks'])->toBeTrue();
+
+    // In the same words the requirement raised at submit uses.
+    attachRequiredDocuments($appId);
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    $req = OfficerRequest::where('application_id', $appId)
+        ->where('system_key', WorkflowService::TIN_REQUIREMENT_KEY)
+        ->firstOrFail();
+    expect($req->title)->toBe($tin['title'])
+        ->and($req->description)->toStartWith($tin['summary']);
+
+    // Filled in: the preview stops naming it.
+    Business::findOrFail($businessId)->update(['tin' => '123-456-789-000']);
+    $filled = test()->withHeaders($owner)
+        ->postJson("/api/v1/applications/{$appId}/fee-preview", [
+            'fee_profile' => ['flags' => ['sells_liquor']],
+        ])
+        ->assertOk()
+        ->json('data.other_requirements');
+    expect(array_column($filled, 'key'))->toBe(['liquor_permit']);
 });
 
 it('names only departments that exist and keys that are its own', function () {

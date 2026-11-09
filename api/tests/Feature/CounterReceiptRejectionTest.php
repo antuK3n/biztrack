@@ -161,14 +161,19 @@ it('requires a reason, of at most 500 characters', function () {
 
 it('rejects only the receipt that is waiting: not a replaced one, a rejected one or one already paid against', function () {
     $filing = rcptFiling();
+    /*
+     * A replaced receipt can no longer be made by sending (one waits at a
+     * time, client, 10 November 2026), but rows replaced before then are
+     * still in the register, so one is stamped the way that send did.
+     */
     $replaced = rcptSend($filing, ['or_number' => '5100002', 'or_date' => now()->subDays(2)->toDateString()]);
+    PaymentProof::findOrFail($replaced)->update(['superseded_at' => now()]);
     $rejected = rcptSend($filing, ['or_number' => '5100003', 'or_date' => now()->subDay()->toDateString()]);
-    expect(PaymentProof::findOrFail($replaced)->superseded_at)->not->toBeNull();
 
     authAs('bplo@biztrack.local');
     $gone = 'This receipt is no longer waiting for BPLO.';
 
-    // Replaced by the owner's newer one.
+    // Replaced by the owner's newer one, before 10 November 2026.
     rcptReject($replaced)->assertStatus(422)->assertJsonPath('errors.proof.0', $gone);
     expect(PaymentProof::findOrFail($replaced)->rejected_at)->toBeNull();
 

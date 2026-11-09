@@ -15,8 +15,10 @@ use App\Models\BusinessOwner;
 use App\Models\PermitType;
 use App\Models\PsicCode;
 use App\Services\NotificationService;
+use App\Services\WorkflowService;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
+use App\Support\ContactRules;
 use App\Support\MalabonGeo;
 use App\Support\Numbering;
 use App\Support\OfficerEditRules;
@@ -308,7 +310,7 @@ class BusinessController extends Controller
         $business = $application->business;
         abort_unless($business !== null, 422, 'This filing has no business on the register.');
 
-        $data = $this->validateBusiness($request, $business);
+        $data = $this->validateBusiness($request, $business, asOfficer: true);
         $reason = trim((string) ($request->validate([
             'reason' => ['nullable', 'string', 'max:500'],
         ])['reason'] ?? ''));
@@ -490,6 +492,13 @@ class BusinessController extends Controller
                 ...self::paperFormFields($data),
             ]);
             $this->syncAddressAndLines($business, $data);
+
+            /*
+             * A TIN saved here — on a returned filing's form, most often —
+             * answers the TIN requirement raised at submit (client, 10
+             * November 2026), so it is closed with the save.
+             */
+            app(WorkflowService::class)->settleTinRequirements($business->fresh());
         });
 
         Audit::log('business.updated', $business);
@@ -752,8 +761,26 @@ class BusinessController extends Controller
      *                                   duplicate-certificate check so an
      *                                   update does not clash with itself
      */
-    private function validateBusiness(Request $request, ?Business $business = null): array
+    private function validateBusiness(Request $request, ?Business $business = null, bool $asOfficer = false): array
     {
+        /*
+         * The contact and name rules (ContactRules, 10 November 2026) judge
+         * what is SENT. For BPLO's Edit mode, though, a value the officer
+         * restated untouched is not theirs to fix: the review page sends the
+         * whole form back, and a landline stored as the emergency number
+         * before the rule existed must not stop a correction to the trade
+         * name. So on that path an unchanged stored value passes; anything
+         * the officer types is held to the rule. The applicant's own saves
+         * are judged in full — their screen asks them to fix it.
+         */
+        $primaryOwner = $asOfficer ? $business?->owners()->where('is_primary', true)->first() : null;
+        $kept = fn (Closure $rule, mixed $stored): Closure => function (string $attribute, mixed $value, Closure $fail) use ($rule, $stored, $asOfficer) {
+            if ($asOfficer && $stored !== null && is_scalar($value) && trim((string) $value) === trim((string) $stored)) {
+                return;
+            }
+            $rule($attribute, $value, $fail);
+        };
+
         /*
          * Item 94 — `registration_type` is the organisation STRUCTURE, and the
          * registering agency is derived from it, not stored beside it.
@@ -894,47 +921,8 @@ class BusinessController extends Controller
              */
             'registration_number' => [
                 'required', 'string', 'min:4', 'max:100',
-                'regex:/^(?=.*\d)[A-Za-z0-9][A-Za-z0-9 .\-\/]*$/',
-                function (string $attribute, mixed $value, Closure $fail) use ($request, $business) {
-                    $key = Business::normalizeRegistrationNumber(is_scalar($value) ? (string) $value : '');
-                    if ($key === '') {
-                        return;
-                    }
-
-                    /*
-                     * Compared in PHP rather than in SQL. The normalisation
-                     * strips every non-alphanumeric character, and SQLite has no
-                     * regex function to do that in a WHERE clause — a LIKE
-                     * approximation would be the bypassable comparison this
-                     * exists to prevent. The register is small enough that the
-                     * honest version costs nothing, and it is scoped to rows
-                     * belonging to OTHER owners.
-                     */
-                    $clash = Business::query()
-                        ->whereNotNull('registration_number')
-                        ->where('owner_user_id', '!=', $request->user()->id)
-                        ->when($business !== null, fn ($q) => $q->whereKeyNot($business->id))
-                        ->get(['id', 'registration_number'])
-                        ->first(fn (Business $other) => Business::normalizeRegistrationNumber(
-                            $other->registration_number,
-                        ) === $key);
-
-                    if ($clash !== null) {
-                        /*
-                         * The other business is NOT named. Its name and owner
-                         * belong to somebody else, and echoing them back would
-                         * turn this field into a lookup for whether a given
-                         * certificate is registered in Malabon and to whom.
-                         * BPLO can see both rows; the applicant gets the fact
-                         * and the counter as the way to resolve it.
-                         */
-                        $fail(
-                            'This registration number is already on file for another account. '
-                            .'Check the number against your certificate — if it is correct, '
-                            .'contact BPLO so they can sort out which record it belongs to.'
-                        );
-                    }
-                },
+                self::REGISTRATION_NUMBER_REGEX,
+                self::registrationNumberUnclaimed($request->user()->id, $business),
             ],
             /*
              * Philippine TIN: 9 digits, plus a 3 to 5 digit branch code where
@@ -1000,8 +988,14 @@ class BusinessController extends Controller
              * out-of-city case has somewhere to put a real one.
              */
             'address.postal_code' => ['nullable', 'string', 'max:20'],
-            'address.telephone' => ['nullable', 'string', 'max:40'],
-            'address.website' => ['nullable', 'string', 'max:255'],
+            /*
+             * The contact rules (client, 10 November 2026): the screen has
+             * refused a malformed number or website since September, the API
+             * took any text. ContactRules holds the one copy, which the
+             * correction card's door reads too.
+             */
+            'address.telephone' => ['nullable', 'string', 'max:40', $kept(ContactRules::phone(ContactRules::LANDLINE_MESSAGE), $business?->address?->telephone)],
+            'address.website' => ['nullable', 'string', 'max:255', $kept(ContactRules::website(), $business?->address?->website)],
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.psic_code_id' => ['required', 'exists:psic_codes,id'],
             'lines.*.capitalization' => ['nullable', 'numeric', 'min:0'],
@@ -1050,7 +1044,8 @@ class BusinessController extends Controller
             // Same: on no paper form BizTrack holds, and no fee rule reads it.
             'monthly_rental' => ['nullable', 'numeric', 'min:0'],
             'emergency_contact_name' => ['nullable', 'string', 'max:255'],
-            'emergency_contact_number' => ['nullable', 'string', 'max:40'],
+            // The screen's hint is "11 digits, starting 09": an inspector calls it.
+            'emergency_contact_number' => ['nullable', 'string', 'max:40', $kept(ContactRules::emergencyNumber(), $business?->emergency_contact_number)],
             /*
              * BPLO item B6. Banded to the six the paper prints, so a caller
              * cannot invent a seventh economic organization the officer's sheet
@@ -1066,10 +1061,10 @@ class BusinessController extends Controller
              * genuinely wants to name an officer in charge is not refused here,
              * it is simply never asked.
              */
-            'president_officer_name' => ['nullable', 'string', 'max:255'],
+            'president_officer_name' => ['nullable', 'string', 'max:255', $kept(ContactRules::personName(), $business?->president_officer_name)],
             'citizenship' => ['nullable', 'string', 'max:100'],
             // A percentage, not an amount: decimal(5,2) holds 0.00 to 100.00.
-            'address.mobile_number' => ['nullable', 'string', 'max:40'],
+            'address.mobile_number' => ['nullable', 'string', 'max:40', $kept(ContactRules::mobile(), $business?->address?->mobile_number)],
             'address.email' => ['nullable', 'email', 'max:255'],
             'capital_participation_filipino' => ['nullable', 'numeric', 'min:0', 'max:100'],
             // BPLO item B7 — one figure for the whole business. The per-line
@@ -1087,10 +1082,11 @@ class BusinessController extends Controller
              * `gender` is bounded to the two the paper prints (M / F boxes).
              */
             'owner' => ['sometimes', 'array'],
-            'owner.surname' => ['nullable', 'string', 'max:100'],
-            'owner.given_name' => ['nullable', 'string', 'max:100'],
-            'owner.middle_name' => ['nullable', 'string', 'max:100'],
-            'owner.suffix' => ['nullable', 'string', 'max:20'],
+            // A person's name, never a digit (client, 10 November 2026).
+            'owner.surname' => ['nullable', 'string', 'max:100', $kept(ContactRules::personName(), $primaryOwner?->surname)],
+            'owner.given_name' => ['nullable', 'string', 'max:100', $kept(ContactRules::personName(), $primaryOwner?->given_name)],
+            'owner.middle_name' => ['nullable', 'string', 'max:100', $kept(ContactRules::personName(), $primaryOwner?->middle_name)],
+            'owner.suffix' => ['nullable', 'string', 'max:20', $kept(ContactRules::personName(), $primaryOwner?->suffix)],
             'owner.gender' => ['nullable', 'in:M,F'],
             // BPLO item B8 (new form) / B7 (renewal). Not derivable from the
             // `is_bmbe` / `is_cooperative` fee-profile flags — see the Business
@@ -1188,6 +1184,63 @@ class BusinessController extends Controller
         }
 
         return 'Choose your type of registration: sole proprietorship, partnership, corporation, or cooperative.';
+    }
+
+    /** BPLO items 1-2: the registration number's shape, as the wizard checks it. */
+    public const REGISTRATION_NUMBER_REGEX = 'regex:/^(?=.*\d)[A-Za-z0-9][A-Za-z0-9 .\-\/]*$/';
+
+    /**
+     * The same certificate under another owner is refused (client, 16
+     * September 2026 — see the note on `registration_number` in
+     * validateBusiness for why the scope is the owner, not the row).
+     *
+     * A method rather than an inline closure since 10 November 2026, so the
+     * correction card after a Return (ApplicationController::
+     * validateCorrections) runs the same check instead of storing any number
+     * it is sent.
+     */
+    public static function registrationNumberUnclaimed(int $ownerUserId, ?Business $business): Closure
+    {
+        return function (string $attribute, mixed $value, Closure $fail) use ($ownerUserId, $business) {
+            $key = Business::normalizeRegistrationNumber(is_scalar($value) ? (string) $value : '');
+            if ($key === '') {
+                return;
+            }
+
+            /*
+             * Compared in PHP rather than in SQL. The normalisation
+             * strips every non-alphanumeric character, and SQLite has no
+             * regex function to do that in a WHERE clause — a LIKE
+             * approximation would be the bypassable comparison this
+             * exists to prevent. The register is small enough that the
+             * honest version costs nothing, and it is scoped to rows
+             * belonging to OTHER owners.
+             */
+            $clash = Business::query()
+                ->whereNotNull('registration_number')
+                ->where('owner_user_id', '!=', $ownerUserId)
+                ->when($business !== null, fn ($q) => $q->whereKeyNot($business->id))
+                ->get(['id', 'registration_number'])
+                ->first(fn (Business $other) => Business::normalizeRegistrationNumber(
+                    $other->registration_number,
+                ) === $key);
+
+            if ($clash !== null) {
+                /*
+                 * The other business is NOT named. Its name and owner
+                 * belong to somebody else, and echoing them back would
+                 * turn this field into a lookup for whether a given
+                 * certificate is registered in Malabon and to whom.
+                 * BPLO can see both rows; the applicant gets the fact
+                 * and the counter as the way to resolve it.
+                 */
+                $fail(
+                    'This registration number is already on file for another account. '
+                    .'Check the number against your certificate — if it is correct, '
+                    .'contact BPLO so they can sort out which record it belongs to.'
+                );
+            }
+        };
     }
 
     /**

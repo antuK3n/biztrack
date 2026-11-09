@@ -573,6 +573,7 @@ test('an owner files a business permit, and it goes to BPLO to be read', async (
           fee_profile: {
             business_structure: 'sole_proprietorship',
             floor_area_sqm: 120,
+            storeys: 2,
             employees: 12,
             employees_in_lgu: 6,
             /*
@@ -1245,11 +1246,10 @@ test('paying opens the clearance stage, and applying routes each office', async 
      * here would hand in sheets a real applicant could not have handed in.
      * SANITARY wants a classification, OCCUPANCY what NBC Form B-13 prints (the
      * project, the building permit, the Certificate of Completion), and CEC
-     * both an owner's address — the one field on MCG-CENRO-FO-001 the register
-     * does not hold anywhere — and the certification, which is an act rather
-     * than a fact. FSIC and ZONING require nothing: FSIC derives every answer,
-     * and CPDD's paper marks neither of its two questions mandatory. They still
-     * PUT, because the PUT is the hand-in.
+     * an owner's address and the certification, which is an act rather than
+     * a fact. The storey count is not posted: the API carries it from the fee
+     * profile above, locked (10 November 2026). FSIC and ZONING then require
+     * nothing typed. They still PUT, because the PUT is the hand-in.
      */
     const sheets: Record<string, Record<string, string>> = {
       SANITARY: { sanitary_classification: 'Food Establishment' },
@@ -1258,14 +1258,16 @@ test('paying opens the clearance stage, and applying routes each office', async 
         project_name: 'Playwright Store',
         project_location: '3 Playwright St., Longos, Malabon City',
         occupancy_type: 'Mercantile',
-        building_storeys: '1',
         building_units: '1',
         total_floor_area_sqm: '24',
         building_permit_no: 'BP-MLB-2026-0101',
-        completion_documents: 'Certificate of Completion, As-built Plans/Specifications',
+        // Documents Submitted is ticked by the API from the uploads since
+        // 10 November 2026; the owner names the signer and picks one of two.
         completion_submitted_by: 'Engr. Paolo R. Mendiola',
         completion_professional: 'Civil Engineer',
       },
+      // The address stands only where the account holds none; otherwise the
+      // API replaces it with the account's (10 November 2026).
       CEC: { owner_address: '3 Playwright St., Longos, Malabon City', certified: 'yes' },
       FSIC: {},
       ZONING: {},
@@ -1625,21 +1627,26 @@ test('one office’s approval closes its own review and moves nobody else’s', 
    * on THAT are further down this file, unchanged: from the officer's seat
    * the filing really is out with the other offices.
    */
-  await expect(
-    page.getByText('Approved', { exact: true }).first(),
-    'the applicant’s status card should read Permit Released',
-  ).toBeVisible()
-
   /*
-   * "Approved" may not be anywhere at all yet, history included — one office of
-   * six has accepted paperwork, no visit has happened, and nothing has been
-   * granted. This is the strong form of the assertion and it is available here
-   * precisely because the history is still short.
+   * ── The status line, since 10 November 2026 ─────────────────────────────
+   *
+   * The big "Business Permit Released" card went when the client had this
+   * page trimmed; one badge says the status now, and it is the chip Track
+   * draws (`filingStatusMeta`), which reads "Approved" on a filing still
+   * gathering its other permits (`GATHERING_META`). This used to assert that
+   * "Approved" appeared nowhere at this point — true only while the Business
+   * Permit waited on every office, which ended when it moved to payment
+   * (24 September 2026) — so it now asserts what the line must say instead:
+   * the Business Permit is out, and the other permits are still counting.
    */
   await expect(
-    page.getByText('Approved', { exact: true }),
-    'one office accepting paperwork told the applicant something was approved',
-  ).toHaveCount(0)
+    page.getByText('Approved', { exact: true }).first(),
+    'the applicant’s status badge should read Approved while the other permits come in',
+  ).toBeVisible()
+  await expect(
+    page.getByText(/Your Business Permit is issued\. \d+ of \d+ other permits approved/),
+    'the status line does not say how many of the other permits are approved',
+  ).toBeVisible()
 
   /* ── And BPLO watches the stage from a tab of its own (QUEUE-1) ────────── */
 
@@ -2234,54 +2241,34 @@ test('the owner is shown the approval and every permit it produced', async ({ pa
   expect(new Set(names).size, 'two permit rows carry the same accessible name').toBe(names.length)
 })
 
-test('the approved filing offers the permits it produced, not one of them', async ({ page }) => {
+test('the approved filing points to My Permits, where every permit it produced is', async ({ page }) => {
   const narrative = recall()
   const { appId } = narrative
 
   /*
-   * ── The regression guard for a defect this test reported, now fixed ───────
+   * ── Rewritten 10 November 2026, when the client had this page trimmed ──────
    *
-   * The filing issues seven certificates. Its own screen used to offer one.
+   * This guarded a defect it once reported: the filing's own screen offered
+   * one certificate of seven, as `app.permits[0]` under the literal name
+   * "Business Permit". The fix drew a chip per permit, named from
+   * `permit_type.name`, and this counted them.
    *
-   * `ApplicationDetailPage` did `const issuedPermit = app.permits[0]` and drew
-   * a single eye chip and a single download arrow, both labelled "Business
-   * Permit" and "Download Business Permit" as literal strings — not from
-   * `permit_type.name`. Two things were wrong at once and only one of them was
-   * cosmetic:
-   *
-   *  - six of the seven certificates the applicant paid for had no route from
-   *    the filing that produced them. They were on Profile, so nothing was
-   *    lost; but the screen that says "Approved" is the screen an applicant goes
-   *    to, and it presented the outcome as a single document;
-   *  - the one it did offer was named unconditionally. `permits[0]` is whatever
-   *    `approveAndIssue` inserted first, which is the filing's permit-type order
-   *    and not a guarantee. The first filing whose order put a clearance ahead
-   *    of the Mayor's Permit served a Sanitary Permit under a link that read
-   *    "Download Business Permit" — a certificate under another certificate's
-   *    name, which on a legal instrument is not a label problem.
-   *
-   * The card now maps every permit and takes each name from `permit_type.name`.
-   * Asserted as a count rather than by inspecting the label, because the count
-   * is the user-visible claim: seven were issued, so seven should be reachable.
+   * The chips are gone now (client: the page "has links/buttons that can be
+   * accessed anywhere"). My Permits lists every permit under its own name, and
+   * the test above already checks Profile holds one row per type. So the rule
+   * here is the hand-off: the approved filing sends the owner to My Permits,
+   * and offers no per-permit link of its own that could drift from that list.
    */
   await page.goto(`/applications/${appId}`)
-  await expect(page.getByText(/^Approved$/).first()).toBeVisible({ timeout: 30_000 })
+  // "Completed" is the badge a decided filing wears (`filingStatusMeta`).
+  await expect(page.getByText(/^Completed$/).first()).toBeVisible({ timeout: 30_000 })
 
-  /*
-   * Counted by DESTINATION, not by control: the card draws an eye chip and a
-   * download arrow, so two links point at the same certificate. What is being
-   * asserted is how many of the seven are reachable at all.
-   */
-  const offered = await page
-    .locator('a[href^="/permits/"]')
-    .evaluateAll((els) => [...new Set(els.map((e) => e.getAttribute('href') ?? ''))])
-  const labels = await page
-    .locator('a[href^="/permits/"]')
-    .evaluateAll((els) => els.map((e) => e.getAttribute('aria-label') ?? e.textContent?.trim() ?? ''))
-
-  expect(
-    offered.length,
-    `the approved filing offers ${offered.length} of its ${FILED_CODES.length} permits, ` +
-      `under the labels: ${labels.join(' / ')}`,
-  ).toBe(FILED_CODES.length)
+  await expect(
+    page.getByRole('link', { name: /^See (it|them) in My Permits$/ }),
+    'the approved filing does not point to My Permits',
+  ).toHaveAttribute('href', '/permits')
+  await expect(
+    page.locator('a[href^="/permits/"]'),
+    'the status page still draws its own per-permit links',
+  ).toHaveCount(0)
 })

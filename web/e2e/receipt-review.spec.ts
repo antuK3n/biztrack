@@ -79,7 +79,7 @@ async function sendReceipt(page: Page, orNumber: string) {
   await page.getByLabel('OR number').fill(orNumber)
   await page.getByLabel('Date paid').fill(yesterday())
   await page.getByRole('button', { name: 'Send proof of payment' }).click()
-  await expect(page.getByText('Proof sent. BPLO will confirm your payment.')).toBeVisible()
+  await expect(page.getByText('Receipt sent — waiting for BPLO')).toBeVisible()
 }
 
 test('BPLO rejects the owner’s receipt with a reason, the owner sends another, and BPLO marks it paid', async ({ page }) => {
@@ -168,7 +168,7 @@ test('BPLO rejects the owner’s receipt with a reason, the owner sends another,
   await expect(refused).toContainText(`BPLO did not accept your receipt: ${REASON}`)
   await expect(refused).toContainText('Send a new one below.')
   await expect(page.getByText(`Sent: OR ${firstOr} · ${yesterdayLong()}`)).toBeVisible()
-  await expect(page.getByText('Proof sent. BPLO will confirm your payment.')).toHaveCount(0)
+  await expect(page.getByText('Receipt sent — waiting for BPLO')).toHaveCount(0)
   // The send form is below it, as usual.
   await expect(page.getByRole('button', { name: 'Send proof of payment' })).toBeVisible()
   await refused.scrollIntoViewIfNeeded()
@@ -178,6 +178,8 @@ test('BPLO rejects the owner’s receipt with a reason, the owner sends another,
   await sendReceipt(page, secondOr)
   await expect(page.getByText('BPLO did not accept your receipt')).toHaveCount(0)
   await expect(page.locator('dl').filter({ hasText: 'OR number' })).toContainText(secondOr)
+  // One receipt waits at a time (client, 10 November 2026): the form is gone again.
+  await expect(page.getByRole('button', { name: 'Send proof of payment' })).toHaveCount(0)
 
   /* ── 7. The holder marks the bill paid against the new receipt ───────── */
   card = await pendingPaymentCard(page, filing.tracking)

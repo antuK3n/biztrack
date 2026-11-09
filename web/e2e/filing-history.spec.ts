@@ -32,6 +32,8 @@ test('a paid filing still gathering its other permits reads Approved in History,
   expect(paid).toBe(201)
 
   await page.goto(`/applications/${id}`)
+  // Folded shut since 10 November 2026 (client: trim the status page); opened as a reader would.
+  await page.locator('summary', { hasText: /^History$/ }).click()
   const history = page
     .locator('section')
     .filter({ has: page.getByText('History', { exact: true }) })

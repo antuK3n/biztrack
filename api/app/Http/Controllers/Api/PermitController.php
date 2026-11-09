@@ -908,10 +908,21 @@ class PermitController extends Controller
         // the same bytes (revision matrix item 7; see PermitSignature).
         $file = PermitSignature::sign(PdfFile::render($pdf));
 
-        $path = "private/permits/{$permit->id}.pdf";
-        Storage::disk('local')->put($path, $file->content);
-        if ($permit->pdf_path !== $path) {
-            $permit->update(['pdf_path' => $path]);
+        /*
+         * Archived only while the permit is in force [client, 10 November
+         * 2026]. Every download used to overwrite private/permits/{id}.pdf,
+         * so the first download after a permit expired replaced the copy it
+         * was issued as with one stamped EXPIRED, and the record of what the
+         * City issued was gone. A permit out of force is still served —
+         * drawn fresh with its watermark and signed like any other — but the
+         * archive keeps the last copy made while it was good.
+         */
+        if ($permit->inForce()) {
+            $path = "private/permits/{$permit->id}.pdf";
+            Storage::disk('local')->put($path, $file->content);
+            if ($permit->pdf_path !== $path) {
+                $permit->update(['pdf_path' => $path]);
+            }
         }
 
         return DownloadLog::record($file->download("permit-{$permit->permit_number}.pdf"), 'permit', $permit);
@@ -1458,7 +1469,11 @@ class PermitController extends Controller
              * The left page's own lines [client, 27 October 2026]: which
              * documents were handed in, and who signed the Certificate of
              * Completion — the licensed professional the owner hired. All
-             * from the OBO sheet (OfficeFormStep, section D).
+             * from the OBO sheet (OfficeFormStep, section D). Since 10
+             * November 2026 the documents are ticked from the sheet's uploads
+             * and "Others" is OBO's own entry, both by
+             * OfficeFormAnswers::derive; the owner types only the name and
+             * picks Civil Engineer or Architect.
              */
             $documents = array_values(array_filter(array_map('trim', explode(',', (string) ($sheet['completion_documents'] ?? '')))));
 
@@ -1503,6 +1518,9 @@ class PermitController extends Controller
             'suspended_on' => $permit->status === PermitStatus::Suspended
                 ? optional($permit->suspended_at)->format('F j, Y')
                 : null,
+            // The watermark and dated banner a permit out of force prints
+            // (client, 10 November 2026); null on one in force.
+            'status_mark' => $this->statusMark($permit),
             /*
              * ── The face as it was SIGNED, not as the register reads today ───
              *
@@ -1531,6 +1549,76 @@ class PermitController extends Controller
             'signatories' => $signatories,
             'verify_url' => rtrim((string) config('app.frontend_url'), '/').'/verify/'.$permit->permit_number,
         ];
+    }
+
+    /**
+     * What a certificate out of force prints across its face: a large pale
+     * watermark word and a one-line dated banner under the title, or null for
+     * one in force.
+     *
+     * [Client, 10 November 2026: "Whenever the business permit is expired, is
+     * it really best to just put an 'Expired' word in the permit itself? Same
+     * with other statuses." — and chose a watermark with a dated banner.] It
+     * replaces an 11px red word under the title, which named the status but
+     * not since when, and which a photocopy or a quick glance at a shop wall
+     * could miss.
+     *
+     * The status is the verify page's (`Permit::statusAsShown`), so an Active
+     * permit past its term prints EXPIRED before the nightly scan writes it.
+     * Superseded prints REPLACED, the word an owner uses for a renewal, with
+     * the permit that replaced it. No reason is ever printed — only a date,
+     * which is the verify page's rule too: why is between the City and the
+     * owner. A date the register never recorded is left off rather than
+     * guessed.
+     *
+     * @return array{word: string, banner: string}|null
+     */
+    private function statusMark(Permit $permit): ?array
+    {
+        $status = $permit->statusAsShown();
+        if ($status === null || $status->isLive()) {
+            return null;
+        }
+
+        $on = fn ($date) => $date ? strtoupper($date->format('F j, Y')) : null;
+
+        /*
+         * When it became this status, off the audit log the Status history
+         * dialog reads (describeHistory), for the statuses whose date has no
+         * column of its own — Retired, Rejected, and an Expired set by hand.
+         */
+        $changedOn = function () use ($permit, $status, $on): ?string {
+            $log = AuditLog::query()
+                ->where('auditable_type', Permit::class)
+                ->where('auditable_id', $permit->id)
+                ->orderByDesc('id')
+                ->get()
+                ->first(fn (AuditLog $log) => self::describeHistory($log)['to'] === $status->value);
+
+            return $on($log?->created_at);
+        };
+
+        $word = $status === PermitStatus::Superseded ? 'REPLACED' : strtoupper($status->label());
+
+        $banner = match ($status) {
+            // Its term's last day when that has passed; set by hand before
+            // then, the day it was set.
+            PermitStatus::Expired => ($permit->valid_until && ! $permit->valid_until->copy()->endOfDay()->isFuture())
+                ? 'EXPIRED ON '.$on($permit->valid_until)
+                : (($d = $changedOn()) ? "EXPIRED ON {$d}" : 'EXPIRED'),
+            PermitStatus::Suspended => ($d = $on($permit->suspended_at)) ? "SUSPENDED SINCE {$d}" : 'SUSPENDED',
+            PermitStatus::Revoked => ($d = $on($permit->revoked_at) ?? $changedOn()) ? "REVOKED ON {$d}" : 'REVOKED',
+            PermitStatus::Superseded => (function () use ($permit, $on, $changedOn) {
+                // The renewal that names this permit as its prior.
+                $next = $permit->renewals()->orderBy('id')->first();
+                $d = $on($next?->issued_at) ?? $changedOn();
+
+                return 'REPLACED'.($d ? " ON {$d}" : '').($next ? " BY {$next->permit_number}" : '');
+            })(),
+            default => ($d = $changedOn()) ? "{$word} ON {$d}" : $word,
+        };
+
+        return ['word' => $word, 'banner' => $banner];
     }
 
     /**

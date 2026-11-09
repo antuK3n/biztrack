@@ -237,6 +237,21 @@ class Permit extends Model
     }
 
     /**
+     * The status a reader should be shown: the stored one, except that an
+     * Active permit past its term is Expired. `biztrack:scan-permits` writes
+     * Expired overnight, so for up to a day the column still says Active on a
+     * certificate whose date has passed. The verify page and the printed
+     * certificate both answer with this, so the QR and the paper cannot
+     * disagree (client, 10 November 2026).
+     */
+    public function statusAsShown(): ?PermitStatus
+    {
+        return $this->status === PermitStatus::Active && ! $this->inForce()
+            ? PermitStatus::Expired
+            : $this->status;
+    }
+
+    /**
      * Days until expiry (negative if already past), counted from BusinessDate:
      * the Debug page's pretend date when one is set, so the countdown on every
      * permit screen agrees with the late surcharge the same filing would get.

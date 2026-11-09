@@ -14,7 +14,8 @@ import { sessionFor } from './helpers'
  * Completed from the refusal, so the permit sat For Approval in nobody's queue.
  *
  * Fire Safety, because its sheet asks the owner for one thing of its own:
- * occupancy and storeys come from the OBO sheet and the checklist is attached
+ * occupancy and storeys come from the Business Permit application (locked
+ * since 3 and 10 November 2026) and the checklist is attached
  * before the first hand-in, so ticking the certification is the edit that
  * proves the sheet is a form again, and Submit then carries the press through
  * to the office's queue.
@@ -94,6 +95,7 @@ async function paidFiling(): Promise<number> {
         fee_profile: {
           business_structure: 'sole_proprietorship',
           floor_area_sqm: 120,
+          storeys: 2,
           employees: 12,
           employees_in_lgu: 6,
         },

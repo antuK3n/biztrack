@@ -347,3 +347,26 @@ it('refuses an edit on a case nobody has been assigned yet', function () {
         ->assertJsonPath('message', 'Assign this filing to yourself before editing it.');
     expect($app->fresh()->business->name)->not->toBe('Unassigned Edit');
 });
+
+/*
+ * The contact rules (ContactRules, 10 November 2026) judge what an officer
+ * TYPES, not what the page restates. A landline stored as the emergency
+ * number before the rule existed must not stop BPLO fixing the trade name.
+ */
+it('lets BPLO save past a legacy contact value it did not touch, and holds a new one to the rule', function () {
+    $app = filingForOfficerEdit('Legacy Contact Co');
+    $app->business->update(['emergency_contact_number' => '8281 4712']);
+
+    authAs('bplo@biztrack.local');
+    test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, [
+        'name' => 'Legacy Contact Trading',
+        'reason' => 'Misspelt on the form.',
+    ]))->assertOk();
+
+    test()->putJson("/api/v1/applications/{$app->id}/fields", officerFieldsPayload($app, [
+        'emergency_contact_number' => '8281 4713',
+        'reason' => 'Owner gave a new number.',
+    ]))
+        ->assertStatus(422)
+        ->assertJsonValidationErrors(['emergency_contact_number']);
+});

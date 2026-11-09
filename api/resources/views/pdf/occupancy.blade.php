@@ -132,9 +132,6 @@
             </tr>
         </table>
         <div class="occ-title">CERTIFICATE OF OCCUPANCY</div>
-        @if($status_label && $status_label !== 'Active')
-            <div class="status">{{ strtoupper($status_label) }}</div>
-        @endif
 
         <table class="row occ-receipt-row">
             <tr>
@@ -146,11 +143,16 @@
                         <tr><td>OR. NO.</td><td class="occ-receipt-value">{{ $v($or_number ?? null) }}</td></tr>
                         <tr><td>DATE PAID</td><td class="occ-receipt-value">{{ $v($date_paid ?? null) }}</td></tr>
                     </table>
+                    {{-- The status banner sits under the receipt, in the height the QR
+                         beside it already takes: this page fills its frame, and a line
+                         under the title pushed its last paragraph out of it. --}}
+                    @include('pdf.partials.status-mark', ['bannerClass' => 'occ-banner'])
                 </td>
                 <td class="qr-cell occ-qr">
                     @if($qr)
                         <img src="{{ $qr }}" alt="Verification QR code">
                         <div class="caption">Scan to verify</div>
+                        <div class="qr-note">Validity is confirmed only by scanning this QR.</div>
                     @endif
                 </td>
             </tr>

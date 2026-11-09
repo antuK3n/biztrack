@@ -74,11 +74,11 @@ class VerifyController extends Controller
          * The state to SHOW, which is the status except for one case: an
          * Active permit past its term is expired in every sense a scanner
          * cares about, and printing "Active" beside a date that has passed
-         * would read as a contradiction.
+         * would read as a contradiction. `Permit::statusAsShown` holds the
+         * rule, because the printed certificate's watermark reads it too
+         * (client, 10 November 2026).
          */
-        $state = ($permit->status === PermitStatus::Active && ! $inTerm)
-            ? PermitStatus::Expired
-            : $permit->status;
+        $state = $permit->statusAsShown();
         $suspended = $permit->status === PermitStatus::Suspended;
 
         return response()->json([

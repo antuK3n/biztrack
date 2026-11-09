@@ -163,6 +163,28 @@ export function phoneValid(raw: string): boolean {
   return digits >= 7 && digits <= 13
 }
 
+/**
+ * The emergency contact: a mobile, as the box's own hint says ("11 digits,
+ * starting 09"), or the same number written +63. Not `phoneValid`: an
+ * inspector calls this from the field, and a landline in an empty office is
+ * not a way to reach anyone (client, 10 November 2026). The API's twin is
+ * ContactRules::emergencyNumber.
+ */
+export function emergencyNumberValid(raw: string): boolean {
+  const plain = raw.trim().replace(/[\s().-]/g, '')
+
+  return /^(?:09\d{9}|\+?639\d{9})$/.test(plain)
+}
+
+export const EMERGENCY_ERROR = 'Enter 11 digits, starting 09.'
+
+/** A person's name never holds a digit (ContactRules::personName on the API). */
+export function personNameValid(raw: string): boolean {
+  return !/\d/.test(raw)
+}
+
+export const NAME_DIGIT_ERROR = 'A name cannot contain numbers.'
+
 export function websiteValid(raw: string): boolean {
   const trimmed = raw.trim()
   if (!trimmed) return true
@@ -260,7 +282,8 @@ export const SCALAR_FIELD_RULES: Record<string, FieldRule> = {
       ?? (registrationNumberValid(v)
         ? undefined
         : 'Enter a valid registration number.'),
-    maxLength: 60,
+    // The API's cap on the column (BusinessController); it was 60 here.
+    maxLength: 100,
   },
   'form:tin': {
     // Blank is allowed: item 3 is optional, and an officer asks for it
@@ -313,8 +336,46 @@ export const SCALAR_FIELD_RULES: Record<string, FieldRule> = {
     maxLength: 255,
   },
   'form:president_officer_name': {
-    validate: (v) => required(v, 'The name of the President / OIC'),
+    validate: (v) =>
+      required(v, 'The name of the President / OIC')
+      ?? (personNameValid(v) ? undefined : NAME_DIGIT_ERROR),
     maxLength: 255,
+  },
+  /*
+   * Items 10 to 13 and the emergency contact (10 November 2026). They fell
+   * to `scalarFieldRule`'s required-and-255 default, so a correction could
+   * put a digit in a name, a 200-letter surname or a landline as the
+   * emergency number — none of which the first filing takes. Still
+   * required, as the default had them: which boxes are required is not
+   * what changed.
+   */
+  'form:owner_surname': {
+    validate: (v) => required(v, 'The surname') ?? (personNameValid(v) ? undefined : NAME_DIGIT_ERROR),
+    maxLength: 100,
+  },
+  'form:owner_given_name': {
+    validate: (v) => required(v, 'The given name') ?? (personNameValid(v) ? undefined : NAME_DIGIT_ERROR),
+    maxLength: 100,
+  },
+  'form:owner_middle_name': {
+    validate: (v) => required(v, 'The middle name') ?? (personNameValid(v) ? undefined : NAME_DIGIT_ERROR),
+    maxLength: 100,
+  },
+  'form:owner_suffix': {
+    validate: (v) => required(v, 'The suffix') ?? (personNameValid(v) ? undefined : NAME_DIGIT_ERROR),
+    maxLength: 20,
+  },
+  'form:emergency_contact_name': {
+    validate: (v) => required(v, 'The emergency contact person'),
+    maxLength: 255,
+  },
+  'form:emergency_contact_number': {
+    validate: (v) =>
+      required(v, 'The emergency contact number')
+      ?? (emergencyNumberValid(v) ? undefined : EMERGENCY_ERROR),
+    inputMode: 'tel',
+    placeholder: '11 digits, starting 09',
+    maxLength: 20,
   },
   'form:citizenship': {
     validate: (v) => required(v, 'Citizenship'),

@@ -42,9 +42,92 @@ function tinRequirementOn(Application $app): ?OfficerRequest
         ->first();
 }
 
-it('raises a TIN requirement of its own when BPLO approves a filing with none', function () {
+/*
+ * ── Asked at submit, not at approval (client, 10 November 2026) ──────────────
+ *
+ * *"TIN as other requirements is probably missing."* It was raised only when
+ * BPLO approved the form, so the applicant filed, saw nothing under Other
+ * Requirements, and was asked days later. It is raised by the press now, and
+ * the approval-time call is a safety net that must never add a second copy.
+ */
+it('raises a TIN requirement of its own when a filing with none is submitted', function () {
     $app = filingWithoutTin();
-    expect(tinRequirementOn($app))->toBeNull();
+
+    $req = tinRequirementOn($app);
+
+    /*
+     * A MESSAGE, not a document. The client's own argument settles the kind:
+     * supplying a TIN asks for no document, so withholding one cannot turn it
+     * into a document requirement.
+     */
+    expect($req)->not->toBeNull()
+        ->and($req->title)->toBe('Tax Identification Number (TIN)')
+        ->and($req->request_type)->toBe('message')
+        ->and($req->status->value)->toBe('pending')
+        // Nobody wrote it, so nobody is named as having written it.
+        ->and($req->requested_by_user_id)->toBeNull();
+
+    // Submitting was not held up: the TIN stays optional on the form.
+    expect($app->status->value)->toBe('for_approval');
+});
+
+it('raises no second TIN requirement when BPLO approves a filing that has one', function () {
+    $app = filingWithoutTin();
+    $first = tinRequirementOn($app);
+
+    bploApprovesForm($app);
+
+    expect(OfficerRequest::where('application_id', $app->id)
+        ->where('system_key', WorkflowService::TIN_REQUIREMENT_KEY)
+        ->count())->toBe(1)
+        ->and(tinRequirementOn($app->fresh())->id)->toBe($first->id);
+});
+
+/*
+ * Raised at submit, the requirement can be outlived by the form: BPLO returns
+ * the filing and the applicant fills item 3 on the way back. Client, 10
+ * November 2026: it closes itself, rather than asking again for a number the
+ * register already holds.
+ */
+it('closes the TIN requirement when a returned filing comes back with the TIN filled', function () {
+    $app = filingWithoutTin();
+    $req = tinRequirementOn($app);
+    expect($req->status->value)->toBe('pending');
+
+    app(WorkflowService::class)->returnMainForm($app, 'Please give your TIN.', 'form:tin');
+
+    $this->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$app->id}/corrections", [
+            'fields' => ['form:tin' => '123456789000'],
+        ])
+        ->assertOk();
+
+    $fresh = $req->fresh();
+    expect($app->fresh()->status->value)->toBe('for_approval')
+        ->and($fresh->status->value)->toBe('fulfilled')
+        ->and($fresh->applicant_response)->toBe('123-456-789-000')
+        // No officer ruled on it.
+        ->and($fresh->reviewed_by_user_id)->toBeNull();
+
+    // On its history as the applicant's answer, stamped with how it closed.
+    $answer = $fresh->responses()->sole();
+    expect($answer->body)->toBe('123-456-789-000')
+        ->and($answer->user_id)->toBe($app->applicant_user_id)
+        ->and($answer->review_outcome)->toBe('fulfilled');
+
+    // And BPLO's approval asks no second time.
+    bploApprovesForm($app);
+    expect(OfficerRequest::where('application_id', $app->id)
+        ->where('system_key', WorkflowService::TIN_REQUIREMENT_KEY)
+        ->count())->toBe(1)
+        ->and($req->fresh()->status->value)->toBe('fulfilled');
+});
+
+it('still raises the TIN requirement at approval for a filing submitted before the change', function () {
+    $app = filingWithoutTin();
+
+    // A filing submitted before 10 November 2026 reached BPLO with none.
+    tinRequirementOn($app)->delete();
 
     bploApprovesForm($app);
 
@@ -69,6 +152,10 @@ it('raises a TIN requirement of its own when BPLO approves a filing with none', 
 it('raises nothing when the applicant gave a TIN', function () {
     $app = filingWithoutTin('123-456-789-000');
 
+    // Not at submit,
+    expect(tinRequirementOn($app))->toBeNull();
+
+    // nor at approval.
     bploApprovesForm($app);
 
     expect(tinRequirementOn($app->fresh()))->toBeNull();

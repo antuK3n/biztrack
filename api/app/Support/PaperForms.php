@@ -288,7 +288,7 @@ final class PaperForms
             $groups[$group][$row->field] = [
                 'label' => AmendableFields::allows($row->field) ? AmendableFields::label($row->field) : $row->field,
                 'from' => (string) (AmendableFields::describe($row->field, $row->old_value) ?? $row->old_value ?? ''),
-                'to' => (string) (AmendableFields::describe($row->field, $row->new_value) ?? $row->new_value ?? ''),
+                'to' => (string) (AmendableFields::describeNew($row->field, $row->new_value) ?? $row->new_value ?? ''),
             ];
         }
 

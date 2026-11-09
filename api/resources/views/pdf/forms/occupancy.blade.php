@@ -80,7 +80,10 @@
     <tr>
         <td colspan="2" class="fill"></td>
         <td>Tel No.:</td>
-        <td class="fill v">{{ $g('owner_tel') }}</td>
+        {{-- The sheet stopped asking Tel. No. on 10 November 2026 (client):
+             the business's number, as the sheet shows it, unless an older
+             sheet holds its own. --}}
+        <td class="fill v">{{ $g('owner_tel') ?: ($f['mobile'] ?: $f['telephone']) }}</td>
     </tr>
 </table>
 
@@ -95,8 +98,9 @@
     <tr>
         <td class="ck">{{ $ck($tk('CONSTRUCTION_LOGBOOK')) }}</td>
         <td>Construction Logbook, <span class="small">signed and sealed by the Owner's Architect or Civil Engineer who undertook full-time inspection and Supervision</span></td>
-        <td class="ck">☐</td>
-        <td>Others documents deemed necessary: (Specify)<div class="fill" style="height: 13px;"></div><div class="fill" style="height: 13px;"></div><div class="fill" style="height: 13px;"></div></td>
+        {{-- OBO's own "Others (specify)" entry from its review screen (client, 10 November 2026). --}}
+        <td class="ck">{{ $ck($g('completion_other_document') !== '') }}</td>
+        <td>Others documents deemed necessary: (Specify)<div class="fill v" style="height: 13px;">{{ $g('completion_other_document') }}</div><div class="fill" style="height: 13px;"></div><div class="fill" style="height: 13px;"></div></td>
     </tr>
     <tr><td class="ck">{{ $ck($tk('SITE_PHOTOS')) }}</td><td>Photos of Site / Project showing substantial completion</td><td colspan="2"></td></tr>
     <tr><td class="ck">{{ $ck($tk('COMPLETION')) }}</td><td>Certificate of Completion, <span class="small">duly notarized</span></td><td colspan="2"></td></tr>

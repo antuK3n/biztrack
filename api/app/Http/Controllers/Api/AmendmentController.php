@@ -85,7 +85,7 @@ class AmendmentController extends Controller
                  */
                 'current_label' => AmendableFields::describe($field, $current),
                 'new_value' => $row?->new_value,
-                'new_label' => AmendableFields::describe($field, $row?->new_value),
+                'new_label' => $row === null ? null : AmendableFields::describeNew($field, $row->new_value),
                 'requested' => $row !== null,
                 /*
                  * Null until BPLO completes it. Once stamped, the pair

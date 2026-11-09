@@ -163,7 +163,7 @@ final class FsicRequirements
         );
         $representative = trim((string) ($answers['authorized_representative'] ?? ''));
 
-        return ChecklistSupport::build(
+        $rows = ChecklistSupport::build(
             $application,
             'FSIC',
             self::CODE_PREFIX,
@@ -174,6 +174,26 @@ final class FsicRequirements
                 default => $row['when'] === $branch,
             },
         );
+
+        /*
+         * ── No Certificate of Occupancy asked beside an Occupancy Permit ──
+         *
+         * Client, 10 November 2026. When the Occupancy Permit is on this same
+         * filing, the certificate this row asks for is the one OBO is about to
+         * issue: it cannot exist yet, so a required row was a dead end. The
+         * row stays, optional, with a note saying why; on any other filing it
+         * blocks as before.
+         */
+        if ($application->permitTypes()->where('code', 'OCCUPANCY')->exists()) {
+            foreach ($rows as $i => $row) {
+                if ($row['key'] === 'VALID_COO') {
+                    $rows[$i]['blocking'] = false;
+                    $rows[$i]['note'] = 'Not needed: your Occupancy Permit is applied for on this filing.';
+                }
+            }
+        }
+
+        return $rows;
     }
 
     public static function accepts(string $code): bool

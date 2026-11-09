@@ -129,7 +129,12 @@ it('never offers a certification — a signature is an act, not a fact', functio
      * `officeFormMissing` refuses to submit without it — so carrying it forward
      * would sign this year's form with last year's tick AND clear the one gate
      * that makes the applicant do it deliberately.
+     *
+     * An owner with no home address on the account: one with an address has
+     * it locked onto the sheet since 10 November 2026, so last year's is not
+     * offered at all (AccountPrefill).
      */
+    User::where('email', 'owner@biztrack.local')->update(array_map(fn () => null, homeAddress()));
     [$renewal] = renewalWithLastYearsSheet('CEC', [
         'owner_address' => '12 Mabini St., Longos, Malabon',
         'certified' => 'yes',

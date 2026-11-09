@@ -1350,14 +1350,27 @@ export function RequestsPage() {
   const hasMore = data ? data.meta.current_page < data.meta.last_page : false
   const firstLoad = loading && list.length === 0
 
-  const [openId, setOpenId] = useState<number | null>(null)
+  const [searchParams] = useSearchParams()
+  /*
+   * Opened on one request by `?request=<id>`, which is where the owner's
+   * "Additional requirement requested" and "Requirement accepted/declined"
+   * notices point (client, 10 November 2026; they used to open the Application
+   * Status page, which does not list requirements). Read again whenever the
+   * link changes, so a notice clicked while this page is already open still
+   * opens its request. A request not on the loaded page — the newest fifty —
+   * simply leaves the list showing, which still has it a page or two down.
+   */
+  const linkedRequest = Number(searchParams.get('request')) || null
+  const [openId, setOpenId] = useState<number | null>(linkedRequest)
+  useEffect(() => {
+    if (linkedRequest !== null) setOpenId(linkedRequest)
+  }, [linkedRequest])
   /*
    * Opened by `?compose=<applicationId>`, which is how the officer's review
    * sheet reaches this page. The sheet does NOT carry its own copy of the
    * composer: two of the same form drift, and this product has already paid
    * for that once with a retyped PSIC picker.
    */
-  const [searchParams] = useSearchParams()
   const composeFor = searchParams.get('compose')
   const [composing, setComposing] = useState(composeFor !== null)
 

@@ -62,7 +62,7 @@ test('the owner sends the OR, and the BPLO officer holding the filing marks it p
   await page.getByLabel('OR number').fill(orNumber)
   await page.getByLabel('Date paid').fill(daysAgo(1))
   await page.getByRole('button', { name: 'Send proof of payment' }).click()
-  await expect(page.getByText('Proof sent. BPLO will confirm your payment.')).toBeVisible()
+  await expect(page.getByText('Receipt sent — waiting for BPLO')).toBeVisible()
   expect((await filingOf(page, appId)).status).toBe('pending_payment')
 
   // BPLO approved the form through its own queue, so the officer holds the filing.

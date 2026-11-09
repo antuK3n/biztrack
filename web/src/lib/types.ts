@@ -1686,6 +1686,21 @@ export interface Application extends ApplicationListItem {
    * not `[]` when absent.
    */
   requested_changes: RequestedChange[] | null
+  /**
+   * The clearances an amendment's Approve waits for (a move's Zoning
+   * Clearance), each with where it stands. Null when not an amendment; empty
+   * when nothing waits. Client, 10 November 2026.
+   */
+  amendment_waiting_for?: AmendmentWait[] | null
+}
+
+/** One clearance an amendment is waiting for. See `amendment_waiting_for`. */
+export interface AmendmentWait {
+  code: string
+  name: string
+  office: string | null
+  /** not handed in by the owner · with the office · sent back to the owner */
+  state: 'not_handed_in' | 'with_office' | 'with_applicant'
 }
 
 /**

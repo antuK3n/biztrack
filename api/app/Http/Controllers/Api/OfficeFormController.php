@@ -11,11 +11,11 @@ use App\Models\ApplicationOfficeForm;
 use App\Models\PermitType;
 use App\Services\NotificationService;
 use App\Services\WorkflowService;
-use App\Support\AccountPrefill;
 use App\Support\ApplicationVisibility;
 use App\Support\Audit;
 use App\Support\DownloadLog;
 use App\Support\OfficeFormAnswers;
+use App\Support\OfficeFormRules;
 use App\Support\OfficerEditRules;
 use App\Support\PdfFile;
 use App\Support\RenewalPrefill;
@@ -35,9 +35,9 @@ use Illuminate\Support\Str;
  * Two writers share one payload: the applicant answers the questions only they
  * can answer, and the reviewing officer records the issuance dates only the
  * office can know. Anything the system already knows (application type, filing
- * date, which certificate the FSIC is for, and the floor area, storey count,
- * site tenure and authorised representative the zoning sheet carries) is
- * derived here and never asked.
+ * date, which certificate the FSIC is for, the floor area, storey count, site
+ * tenure and authorised representative the zoning sheet carries, and the
+ * owner's home address from the account) is derived here and never asked.
  */
 class OfficeFormController extends Controller
 {
@@ -57,30 +57,30 @@ class OfficeFormController extends Controller
     /**
      * What a sheet is OFFERED, and where each offer came from.
      *
-     * Three sources, one channel. Last year's answers (`RenewalPrefill`), the
-     * account's (`AccountPrefill`, 5 October 2026 — the owner's home address,
-     * which the business permit never asked), and a reading of the filing
-     * (`SanitaryPrefill` — the sanitary classification from the line of
-     * business). The previous filing wins where two speak: it was given on a
-     * form the applicant signed. `prefill_from` names the source per key so
-     * the browser's flag can say "from your previous application", "from
-     * your account" or "suggested" rather than one phrase that is wrong two
-     * times in three.
+     * Two sources, one channel. Last year's answers (`RenewalPrefill`) and a
+     * reading of the filing (`SanitaryPrefill` — the sanitary classification
+     * from the line of business). The previous filing wins where both speak:
+     * it was given on a form the applicant signed. `prefill_from` names the
+     * source per key so the browser's flag says "from your previous
+     * application" or "suggested", whichever is true.
+     *
+     * The account was a third source (`AccountPrefill`, the owner's home
+     * address) until the client had it locked rather than offered (10
+     * November 2026). It is a derived answer now (`OfficeFormAnswers::derive`),
+     * so it arrives in `form_data` and is never offered here.
      *
      * @return array{prefill: array<string, mixed>, prefill_from: array<string, string>}
      */
     private function prefillFor(Application $application, string $code, array $stored): array
     {
         $previous = RenewalPrefill::forSheet($application, $code);
-        $account = array_diff_key(AccountPrefill::forSheet($application, $code, $stored), $previous);
         // A reading of the filing itself — the Sanitary classification from the
-        // line of business. Last year's answer and the account both outrank it.
-        $suggested = array_diff_key(SanitaryPrefill::forSheet($application, $code, $stored), $previous, $account);
+        // line of business. Last year's answer outranks it.
+        $suggested = array_diff_key(SanitaryPrefill::forSheet($application, $code, $stored), $previous);
 
         return [
-            'prefill' => $previous + $account + $suggested,
+            'prefill' => $previous + $suggested,
             'prefill_from' => array_fill_keys(array_keys($previous), 'previous')
-                + array_fill_keys(array_keys($account), 'account')
                 + array_fill_keys(array_keys($suggested), 'application'),
         ];
     }
@@ -498,6 +498,52 @@ class OfficeFormController extends Controller
             );
         }
 
+        $existing = ApplicationOfficeForm::where('application_id', $application->id)
+            ->where('permit_type_id', $permitType->id)
+            ->first();
+        $current = $existing?->form_data ?? [];
+
+        /*
+         * ── What each answer may hold (client, 10 November 2026) ────────────
+         *
+         * Per sheet and per key — whole numbers, the ZIP code, the Tel. No.,
+         * the pick-one lists, text lengths — see OfficeFormRules. Two kinds of
+         * key are left out, because judging them could only refuse a save for
+         * something the sender did not do:
+         *
+         *  - DERIVED answers. derive() overwrites them below whatever was
+         *    posted, and the review page posts the whole sheet back, so a
+         *    stale or legacy value there is never what gets stored.
+         *  - For an office, answers it did NOT change. Its Save carries the
+         *    applicant's whole sheet; an old answer that predates these rules
+         *    must not stop the officer recording an issuance date. The office
+         *    dates themselves keep the date rules below.
+         *  - For the applicant, the office's own keys: they are dropped from
+         *    an applicant's write below, so nothing sent there is stored.
+         */
+        $derivedKeys = array_keys(OfficeFormAnswers::derive($application, $permitType->code, []));
+        $posted = is_array($request->input('form_data')) ? $request->input('form_data') : [];
+        $toCheck = array_diff_key(
+            $posted,
+            array_flip([...$derivedKeys, ...($isOwner ? self::OFFICER_KEYS : [])]),
+        );
+        if (! $isOwner) {
+            // The same "unchanged" test as the correction log below.
+            $asShown = OfficeFormAnswers::derive($application, $permitType->code, $current);
+            $unchanged = fn ($a, $b) => json_encode($a ?? '') === json_encode($b ?? '')
+                || (is_scalar($a ?? '') && is_scalar($b ?? '') && (string) ($a ?? '') === (string) ($b ?? ''));
+            $toCheck = array_filter(
+                $toCheck,
+                fn ($value, $key) => ! $unchanged($asShown[$key] ?? null, $value),
+                ARRAY_FILTER_USE_BOTH,
+            );
+        }
+        // Judged in the one validate() below, so every mistake is named at once.
+        $sheetRules = array_intersect_key(
+            OfficeFormRules::forSheet($permitType->code),
+            array_flip(array_map(fn ($key) => "form_data.$key", array_keys($toCheck))),
+        );
+
         $request->validate([
             // "present", not "required": a sheet whose every answer is derived
             // (the FSIC form) legitimately posts an empty object.
@@ -513,16 +559,19 @@ class OfficeFormController extends Controller
             'form_data.building_permit_date' => ['sometimes', 'nullable', 'date', 'before_or_equal:today'],
             'form_data.fsec_date' => ['sometimes', 'nullable', 'date', 'before_or_equal:today'],
             'form_data.date_issued' => ['sometimes', 'nullable', 'date', 'before_or_equal:today'],
-            // The Sanitary sheet's counts and its one date (5 October 2026).
-            'form_data.toilets_count' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:1000'],
-            'form_data.seating_capacity' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:100000'],
+            // The Sanitary sheet's one date (5 October 2026). Its counts moved
+            // to OfficeFormRules with every other sheet's answers.
             'form_data.pest_control_last_date' => ['sometimes', 'nullable', 'date', 'before_or_equal:today'],
+            // One value per answer, on every key (client, 10 November 2026).
+            'form_data.*' => [OfficeFormRules::scalar()],
+            ...$sheetRules,
         ], [
             'form_data.owner_birthday.before' => "The owner's birthday must be a date in the past.",
             'form_data.building_permit_date.before_or_equal' => 'The building permit date issued cannot be in the future.',
             'form_data.fsec_date.before_or_equal' => 'The FSEC date issued cannot be in the future.',
             'form_data.date_issued.before_or_equal' => 'The date issued cannot be in the future.',
             'form_data.pest_control_last_date.before_or_equal' => 'The last pest control date cannot be in the future.',
+            ...OfficeFormRules::messages(),
         ]);
 
         // Opaque JSON: keep the full payload, not validated()'s narrowed keys.
@@ -536,11 +585,6 @@ class OfficeFormController extends Controller
             422,
             'That permit type is not part of this application.'
         );
-
-        $existing = ApplicationOfficeForm::where('application_id', $application->id)
-            ->where('permit_type_id', $permitType->id)
-            ->first();
-        $current = $existing?->form_data ?? [];
 
         /*
          * ── Who may write what ──────────────────────────────────────────────
@@ -586,9 +630,20 @@ class OfficeFormController extends Controller
              * sheet the applicant has not saved since a derivation changed.
              */
             $shown = OfficeFormAnswers::derive($application, $permitType->code, $current);
+            /*
+             * A derived key is never a correction: derive() below writes over
+             * whatever is sent. Skipped since 10 November 2026, when OBO's
+             * Documents Submitted became one that moves with the uploads —
+             * a stale stored copy riding in through `$current` on a dates-only
+             * save would otherwise read as a locked edit and refuse it.
+             */
+            $derivedAnswers = OfficeFormAnswers::derive($application, $permitType->code, []);
             $same = fn ($a, $b) => json_encode($a ?? '') === json_encode($b ?? '')
                 || (is_scalar($a ?? '') && is_scalar($b ?? '') && (string) ($a ?? '') === (string) ($b ?? ''));
             foreach ($formData as $key => $value) {
+                if (array_key_exists($key, $derivedAnswers)) {
+                    continue;
+                }
                 if (! $same($shown[$key] ?? null, $value)) {
                     $corrected[$key] = ['from' => $current[$key] ?? null, 'to' => $value];
                 }

@@ -41,6 +41,20 @@ final class OfficeFormAnswers
      */
     public const FORM_PERMIT_CODES = PermitType::OFFICE_FORM_CODES;
 
+    /** The sheets that carry `locked_answers` (see derive()). */
+    public const LOCKING_SHEETS = ['ZONING', 'CEC', 'FSIC', 'OCCUPANCY'];
+
+    /**
+     * The Occupancy checklist uploads that tick NBC Form B-13's "Documents
+     * Submitted" boxes, keyed by `OccupancyRequirements` row, in the words the
+     * certificate prints.
+     */
+    public const COMPLETION_DOCUMENTS = [
+        'COMPLETION' => 'Certificate of Completion',
+        'AS_BUILT' => 'As-built Plans/Specifications',
+        'CONSTRUCTION_LOGBOOK' => 'Daily Construction Works Logbook',
+    ];
+
     /**
      * Overlay the answers the system already holds on top of a payload. These
      * always win: the paper form still carries them, but nobody types them.
@@ -60,6 +74,9 @@ final class OfficeFormAnswers
         $derived = [
             'application_date' => ($application->submitted_at ?? now())->toDateString(),
         ];
+        // The answers taken from the Business Permit application or the
+        // account, which the sheet shows locked; see `locked_answers` below.
+        $locked = [];
 
         if ($permitTypeCode === 'ZONING') {
             // VII. Nature of Application — New Business or Renewal.
@@ -86,24 +103,17 @@ final class OfficeFormAnswers
             }
 
             /*
-             * VIII.B. No. of Storey of Building — a SEED now, not a carry.
+             * VIII.B. No. of Storey of Building — carried again, and locked.
              *
-             * The BPLO wizard stopped asking for the storey count on 16
-             * September 2026: measured against a filing holding all six
-             * clearances it moved the total by zero pesos, and the only two
-             * rules that read it need a fine permit category still open with
-             * BPLO. MCG-CPDD-FO-003 is now the one paper that asks, so the
-             * sheet takes the answer itself and the field there is editable.
-             *
-             * This is kept so a filing saved while the wizard still asked
-             * arrives with the box already filled rather than blank. Cast to
-             * an int because a building has whole storeys and "2.0" on a
-             * planning form invites a question nobody meant to ask.
+             * The BPLO wizard stopped asking on 16 September 2026 and this
+             * sheet, BFP's and OBO's each asked for themselves. Client, 10
+             * November 2026 ("ask once, lock everywhere"): Business Operation
+             * asks it, required, into `fee_profile.storeys`, and the three
+             * sheets show that answer read-only. See fromBusinessPermit for
+             * the blank case and amendments.
              */
-            $storeys = $application->fee_profile['storeys'] ?? null;
-            if (is_numeric($storeys)) {
-                $derived['building_storeys'] = (string) (int) $storeys;
-            }
+            $derived += $locked = self::fromBusinessPermit($application, ['building_storeys'])
+                + AccountPrefill::answers($application, 'ZONING');
 
             /*
              * ── VIII.C and VIII.D are ASKED now, not derived ─────────────────
@@ -243,6 +253,9 @@ final class OfficeFormAnswers
         if ($permitTypeCode === 'CEC') {
             $derived['application_type'] = $existingBusiness ? 'Renewal of CEC' : 'Initial Application';
 
+            // Owner's Address, from the account and locked (AccountPrefill).
+            $derived += $locked = AccountPrefill::answers($application, 'CEC');
+
             /*
              * "REQUIRED DENR PERMITS FOR APPLICATION", the right-hand half of
              * MCG-CENRO-FO-001 v2.0, answered for THIS applicant.
@@ -329,14 +342,15 @@ final class OfficeFormAnswers
              * certificate on a business filing is now always the Business
              * Permit kind; the Occupancy kind belongs with a building, not a
              * trade, and is not something this filing applies for. The type of
-             * occupancy and the storey count are asked on this sheet — the BFP
-             * paper prints both boxes — and no longer carried from OBO's.
+             * occupancy and the storey count are no longer carried from OBO's
+             * sheet: both come from the Business Permit application, locked
+             * (client, 3 and 10 November 2026).
              */
             $derived['certificate_applied_for'] = $existingBusiness
                 ? 'FSIC for Business Permit (Renewal of Business)'
                 : 'FSIC for Business Permit (New Business)';
 
-            $derived += self::fromBusinessPermit($application, ['occupancy_type']);
+            $derived += $locked = self::fromBusinessPermit($application, ['occupancy_type', 'building_storeys']);
         }
         // The MARKET branch was here. Market Clearance and the CMO Market Office
         // were removed from the system on 6 September 2026 — see the note in
@@ -368,15 +382,58 @@ final class OfficeFormAnswers
                 : now())->toDateString();
 
             /*
+             * ── Documents Submitted, read off the uploads ────────────────
+             *
+             * Client, 10 November 2026: the owner no longer ticks NBC Form
+             * B-13's "Documents Submitted" boxes. They were a second answer to
+             * a question the checklist below already answers — a box ticked
+             * with no file behind it, or a file with its box left empty — so
+             * the boxes are ticked from the files, the way the printable form
+             * already ticks its "Requirements submitted" list
+             * (PaperForms::sheet). "Others" follows the office's own entry,
+             * `completion_other_document`, which OBO records on its review
+             * screen (OfficerEditRules::SHEET_OFFICE_USE).
+             *
+             * Spelt as the certificate ticks them (PermitController, the
+             * `occ_documents` list); change the two together.
+             */
+            $uploaded = ChecklistSupport::uploads($application, OccupancyRequirements::CODE_PREFIX);
+            $documents = [];
+            foreach (self::COMPLETION_DOCUMENTS as $key => $label) {
+                if (isset($uploaded[OccupancyRequirements::CODE_PREFIX.$key])) {
+                    $documents[] = $label;
+                }
+            }
+            if (trim((string) ($formData['completion_other_document'] ?? '')) !== '') {
+                $documents[] = 'Others';
+            }
+            $derived['completion_documents'] = implode(', ', $documents);
+
+            /*
              * Not the project's name: the Certificate of Occupancy prints it,
              * and it often names the building rather than the trade ("Two-
              * storey Commercial Building"). It starts as the business name and
              * stays the applicant's to change (client, 3 November 2026).
              */
-            $derived += self::fromBusinessPermit(
+            $derived += $locked = self::fromBusinessPermit(
                 $application,
-                ['occupancy_type', 'project_location', 'total_floor_area_sqm'],
-            );
+                ['occupancy_type', 'project_location', 'total_floor_area_sqm', 'building_storeys'],
+            ) + AccountPrefill::answers($application, 'OCCUPANCY');
+        }
+
+        /*
+         * ── Which boxes the sheet shows locked (client, 10 November 2026) ──
+         *
+         * The answers above that come from the Business Permit application or
+         * the account are present only when that record holds one, so the
+         * sheet cannot tell a carried storey count from one the applicant
+         * typed on an older filing. This names them. Always written on these
+         * four sheets, '' when none, so a stale copy saved with the sheet is
+         * overwritten rather than left to lock a box. Machinery, not an
+         * answer: OFFICE_FORM_INTERNAL_KEYS keeps it off every reader.
+         */
+        if (in_array($permitTypeCode, self::LOCKING_SHEETS, true)) {
+            $derived['locked_answers'] = implode(',', array_keys($locked));
         }
 
         return $derived + $formData;
@@ -417,16 +474,21 @@ final class OfficeFormAnswers
         $street = trim(trim((string) ($address?->house_bldg_no ?? '')).' '.trim((string) ($address?->street ?: $address?->line1 ?? '')));
         $location = implode(', ', array_filter([$street, (string) ($address?->barangay?->name ?? '')]));
         $floorArea = $application->fee_profile['floor_area_sqm'] ?? null;
+        // Business Operation's "No. of Storeys" (client, 10 November 2026).
+        // Whole storeys, so "2.0" prints as 2; a legacy 0 is no answer.
+        $storeys = $application->fee_profile['storeys'] ?? null;
 
         $values = [
             'project_name' => (string) $business->name,
             'occupancy_type' => $trade,
             'project_location' => $location,
             'total_floor_area_sqm' => is_numeric($floorArea) ? (string) (0 + $floorArea) : '',
+            'building_storeys' => is_numeric($storeys) && (int) $storeys >= 1 ? (string) (int) $storeys : '',
         ];
 
         // Blank stays out, so a box the business never answered is not
-        // locked empty: the applicant can still fill it.
+        // locked empty: the applicant can still fill it, and an older filing
+        // keeps the storey count typed on its sheet before the wizard asked.
         return array_filter(array_intersect_key($values, array_flip($keys)), fn (string $v) => $v !== '');
     }
 
@@ -445,10 +507,11 @@ final class OfficeFormAnswers
      * for ONE sheet at a time and is reached from both index() and upsert().
      *
      * A sheet reading another sheet is the exception and stays one: it happens
-     * for the authorised representative (FSIC → CPDD) and for the two boxes
-     * the OBO and BFP papers share (OCCUPANCY → FSIC), and in both cases
-     * because ONE paper asks a question a second paper also prints. It is not
-     * a general mechanism for copying answers around.
+     * for the authorised representative (FSIC → CPDD), because ONE paper asks
+     * a question a second paper also prints. It is not a general mechanism for
+     * copying answers around. (OCCUPANCY → FSIC, for the occupancy type and
+     * storeys, ended on 5 October 2026; both come from the Business Permit
+     * application now.)
      *
      * @return array<string, mixed>
      */

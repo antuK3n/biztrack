@@ -1207,11 +1207,44 @@ it('names the new owner on the business and on the reissued permit, and tells BP
         ->and($notice->body)->toContain('Maria Santos Reyes');
 });
 
-it('replaces the named owner whole, so the previous owner’s middle name does not carry over', function () {
+it('submits a first-name-only correction and keeps the surname, middle name, suffix and gender', function () {
     /*
-     * A change of ownership names a different PERSON. A part the new owner
-     * left blank is cleared, not kept — otherwise "Maria Reyes" would inherit
-     * the seller's middle name and suffix.
+     * Client, 10 November 2026: changing only the owner's first name ended
+     * at Submit with "The Surname field is required." The wizard now fills
+     * the other parts from the record, so this is what it sends — the record
+     * as it stands with the first name changed — and approval must keep
+     * gender, which the amendment never asks.
+     */
+    [$appId, $businessId] = amendmentFiling([
+        'owner_surname' => 'Dela Cruz',
+        'owner_given_name' => 'Juana',
+        'owner_middle_name' => 'Santos',
+        'owner_suffix' => 'Jr.',
+    ]);
+    BusinessOwner::updateOrCreate(
+        ['business_id' => $businessId, 'is_primary' => true],
+        ['surname' => 'Dela Cruz', 'given_name' => 'Juan', 'middle_name' => 'Santos', 'suffix' => 'Jr.', 'gender' => 'F'],
+    );
+
+    attachRequiredDocuments($appId);
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    bploApprovesForm($appId);
+
+    $named = BusinessOwner::where('business_id', $businessId)->where('is_primary', true)->firstOrFail();
+    expect($named->given_name)->toBe('Juana')
+        ->and($named->surname)->toBe('Dela Cruz')
+        ->and($named->middle_name)->toBe('Santos')
+        ->and($named->suffix)->toBe('Jr.')
+        ->and($named->gender)->toBe('F');
+});
+
+it('keeps an owner-name part the amendment did not give, rather than clearing it', function () {
+    /*
+     * Client, 10 November 2026, reversing the rule of 5 October: a part not
+     * given keeps what the register holds. Before, approval cleared the
+     * middle name, suffix and gender of a business whose request named only
+     * the surname and given name.
      */
     [$appId, $businessId] = amendmentFiling([
         'owner_surname' => 'Reyes',
@@ -1228,10 +1261,80 @@ it('replaces the named owner whole, so the previous owner’s middle name does n
     bploApprovesForm($appId);
 
     $named = BusinessOwner::where('business_id', $businessId)->where('is_primary', true)->firstOrFail();
-    expect($named->fullName())->toBe('Maria Reyes')
+    expect($named->surname)->toBe('Reyes')
+        ->and($named->given_name)->toBe('Maria')
+        ->and($named->middle_name)->toBe('Kept')
+        ->and($named->suffix)->toBe('Jr.')
+        ->and($named->gender)->toBe('M');
+});
+
+it('empties a middle name the applicant cleared, and still keeps the parts not given', function () {
+    /*
+     * Client, 10 November 2026 ("Cleared = none"): the wizard fills Middle
+     * Name from the record, and clearing it says the new owner has none. It
+     * is sent as null, approved as empty, and read back as "(none)". The
+     * suffix was never touched, so the seller's stays, as does gender.
+     */
+    [$appId, $businessId] = amendmentFiling([
+        'owner_surname' => 'Reyes',
+        'owner_given_name' => 'Maria',
+        'owner_middle_name' => null,
+    ]);
+    BusinessOwner::updateOrCreate(
+        ['business_id' => $businessId, 'is_primary' => true],
+        ['surname' => 'Seller', 'given_name' => 'Old', 'middle_name' => 'Kept', 'suffix' => 'Jr.', 'gender' => 'M'],
+    );
+
+    $owner = authAs('owner@biztrack.local');
+    $row = collect(test()->withHeaders($owner)->getJson("/api/v1/applications/{$appId}/amendments")->json('data'))
+        ->firstWhere('field', 'owner_middle_name');
+    expect($row['requested'])->toBeTrue()
+        ->and($row['new_value'])->toBeNull()
+        ->and($row['new_label'])->toBe(AmendableFields::NONE_LABEL);
+
+    attachRequiredDocuments($appId);
+    test()->withHeaders($owner)->postJson("/api/v1/applications/{$appId}/submit")->assertOk();
+    bploApprovesForm($appId);
+
+    $named = BusinessOwner::where('business_id', $businessId)->where('is_primary', true)->firstOrFail();
+    expect($named->fullName())->toBe('Maria Reyes Jr.')
         ->and($named->middle_name)->toBeNull()
-        ->and($named->suffix)->toBeNull()
-        ->and($named->gender)->toBeNull();
+        ->and($named->suffix)->toBe('Jr.')
+        ->and($named->gender)->toBe('M');
+});
+
+it('refuses a cleared middle name with no new owner named', function () {
+    [$appId] = amendmentFiling([
+        'business_area_sqm' => '250',
+        'owner_middle_name' => null,
+    ]);
+
+    attachRequiredDocuments($appId);
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/submit")
+        ->assertStatus(422)
+        ->assertJsonPath('errors.requested_changes.0', 'The Surname field is required.');
+});
+
+it('refuses a new owner with a blank surname, even when the record holds one', function () {
+    /*
+     * Asked of what was requested, not merged with the register: a merge
+     * would pass this filing on the strength of the seller's surname.
+     */
+    [$appId, $businessId] = amendmentFiling([
+        'owner_given_name' => 'Juana',
+        'owner_middle_name' => 'Santos',
+    ]);
+    BusinessOwner::updateOrCreate(
+        ['business_id' => $businessId, 'is_primary' => true],
+        ['surname' => 'Dela Cruz', 'given_name' => 'Juan'],
+    );
+
+    attachRequiredDocuments($appId);
+    test()->withHeaders(authAs('owner@biztrack.local'))
+        ->postJson("/api/v1/applications/{$appId}/submit")
+        ->assertStatus(422)
+        ->assertJsonPath('errors.requested_changes.0', 'The Surname field is required.');
 });
 
 it('refuses to submit a new owner without both a surname and a given name', function () {

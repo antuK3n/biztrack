@@ -1,7 +1,22 @@
 import { useState } from 'react'
-import { FieldError, FieldLabel, OptionalTag, inputCls } from '../../components/ui/Proto'
+import {
+  FieldError,
+  FieldLabel,
+  OptionalTag,
+  formCell,
+  formGridCls,
+  inputCls,
+} from '../../components/ui/Proto'
 import { OPERATION_LABELS } from './formLabels'
 import type { ApplicationType, FeeProfile, FeeProfileLine } from '../../lib/types'
+import { formatAmountInput, formatCountInput } from '../../lib/numberInput'
+
+/*
+ * The two number formatters live in lib/numberInput since 10 November 2026,
+ * where the office sheets and the amendment step reach them too. Re-exported
+ * so the wizard's existing imports from this file keep working.
+ */
+export { formatAmountInput, formatCountInput }
 
 /*
  * "Business & Tax Profile" wizard step — the applicant-declared inputs the API
@@ -340,36 +355,13 @@ export const MAX_PESOS = 10_000_000_000
 export const MAX_COUNT = 100_000
 const MAX_FLOOR_AREA = 1_000_000
 /*
- * MAX_STOREYS was here, mirroring the API's own ceiling on
- * `fee_profile.storeys`, so the wizard could not let through a number the save
- * would then reject. Both went when the storey count did — see the note where
- * its validation used to run. The API rule stays, because the column and the
- * old drafts that filled it both still exist.
+ * Mirrors the API's ceiling on `fee_profile.storeys` (1 to 200), so the wizard
+ * cannot let through a number the save would then reject. Back with the
+ * question itself on 10 November 2026; see the note where it is validated.
  */
+const MAX_STOREYS = 200
 
-/**
- * "1000000" → "1,000,000"; keeps at most two decimals, drops everything else.
- *
- * Accepts a number as well as a string. This formatter is fed by two very
- * different sources: keystrokes, which are always strings, and saved amounts
- * coming back from the API, which are not — `monthly_rental` arrives as a JSON
- * number while the contract calls it a string. A draft with rented premises
- * used to throw "raw.replace is not a function" here mid-restore, which left
- * the wizard holding a blank form it then tried to save over the real one.
- * A formatter has no business deciding an amount is unusable because of its
- * JSON type.
- */
-export function formatAmountInput(raw: string | number | null | undefined): string {
-  if (raw === null || raw === undefined) return ''
-  const cleaned = String(raw).replace(/[^\d.]/g, '')
-  const dot = cleaned.indexOf('.')
-  const whole = (dot === -1 ? cleaned : cleaned.slice(0, dot)).replace(/^0+(?=\d)/, '')
-  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
-  if (dot === -1) return grouped
-  const fraction = cleaned.slice(dot + 1).replace(/\./g, '').slice(0, 2)
-
-  return `${grouped}.${fraction}`
-}
+/* `formatAmountInput` was here; it is in lib/numberInput, note and all. */
 
 /**
  * "1,000" → "1,000.00", once the applicant has left the field.
@@ -407,10 +399,7 @@ export function padAmountInput(raw: string): string {
   return `${whole}.${fraction.padEnd(2, '0')}`
 }
 
-/** Headcounts, vehicles, stalls: whole numbers only. */
-export function formatCountInput(raw: string): string {
-  return raw.replace(/\D/g, '').replace(/^0+(?=\d)/, '')
-}
+/* `formatCountInput` (whole numbers only) moved to lib/numberInput with it. */
 
 /* ── Validation ─────────────────────────────────────────────────────────── */
 
@@ -552,18 +541,28 @@ export function feeProfileIssues(
       }),
     )
     /*
-     * The storey count's validation went with its box.
+     * ── No. of Storeys, asked once and required (10 November 2026) ────────
      *
-     * It was optional and bounded, and the reasoning for keeping it optional
-     * was that four offices ask for it on paper while the Revenue Code charges
-     * by it only for real-estate lessors. Measuring settled the rest: the
-     * count moves the total by zero, because those lessor rules need a fine
-     * permit category still open with BPLO. The one paper that asks — CPDD's
-     * VIII.B — takes the answer on its own sheet now.
-     *
-     * Nothing validates `draft.storeys` any more, and nothing writes it. It
-     * stays on the type so a filing saved while it was asked still hydrates.
+     * It went on 16 September 2026 because it priced nothing, and the CPDD,
+     * BFP and OBO sheets then each asked it for themselves — three answers
+     * to one question. Client: "ask once, lock everywhere". So it is asked
+     * here, required of every filing carrying the Business Permit, and the
+     * three sheets show it read-only (OfficeFormAnswers::fromBusinessPermit).
      */
+    push(
+      numericIssue({
+        key: 'storeys',
+        label: OPERATION_LABELS.storeys,
+        value: draft.storeys,
+        required: true,
+        blankMessage: 'Enter the number of storeys.',
+        integer: true,
+        positive: true,
+        zeroMessage: 'Enter 1 to 200 storeys.',
+        max: MAX_STOREYS,
+        maxMessage: 'Enter 1 to 200 storeys.',
+      }),
+    )
     /*
      * The total is derived from the two halves, so it cannot be blank while
      * they are filled and cannot be a non-integer at all — which is every
@@ -843,6 +842,8 @@ export function buildFeeProfile(
     ...(has('BUSINESS')
       ? {
           floor_area_sqm: toNumber(draft.floor_area_sqm),
+          // Read by the CPDD, BFP and OBO sheets, locked (10 November 2026).
+          storeys: toInt(draft.storeys),
           employees: toInt(totalEmployees(draft.male_employees, draft.female_employees)),
           male_employees: toInt(draft.male_employees),
           female_employees: toInt(draft.female_employees),
@@ -1010,6 +1011,13 @@ export function feeProfileMissing(
  * from git if a lettered step ever comes back.
  */
 
+/** The essential commodities of Revenue Code Sec. 2J.02(c), taxed at half rate. */
+const ESSENTIALS_LIST =
+  'Rice and corn, flour, meat, dairy and processed food, sugar and salt, cooking oil and ' +
+  'cooking gas, laundry soap and detergents, medicine, fertiliser and other farm inputs, ' +
+  'animal feeds, school supplies, cement. These are taxed at half the ordinary rate ' +
+  '(Revenue Code Sec. 2J.02(c)).'
+
 /**
  * How the Revenue Code classifies this trade — stated, not asked.
  *
@@ -1070,19 +1078,30 @@ function DerivedTaxClass({
     <div>
       <FieldLabel>Taxed as</FieldLabel>
       <p className="text-sm font-semibold text-ink">{label}</p>
+      {/*
+        One line since 10 November 2026 (the compact pass); it read "Worked
+        out from your line of business under the Malabon Revenue Code. To
+        change it, change the line of business in Location & Zoning."
+      */}
       <p className="mt-1 text-xs text-ink-secondary">
-        Worked out from your line of business under the Malabon Revenue Code. To change it, change
-        the line of business in Location &amp; Zoning.
+        From your line of business; change that in Location &amp; Zoning.
       </p>
 
       {asks && (
-        <div className="mt-3.5">
+        <div className="mt-3">
           <FieldLabel required>Do you mainly sell essential commodities?</FieldLabel>
-          <p id={`essentials-help-${line.title}`} className="mb-2 text-xs text-ink-secondary">
-            Rice and corn, flour, meat, dairy and processed food, sugar and salt, cooking oil and
-            cooking gas, laundry soap and detergents, medicine, fertiliser and other farm inputs,
-            animal feeds, school supplies, cement. These are taxed at half the ordinary rate
-            (Revenue Code Sec. 2J.02(c)).
+          {/*
+            One visible line since 10 November 2026. The full Sec. 2J.02(c)
+            list is what an applicant answers against, so it is kept: on hover
+            (`title`) and read out in full through `aria-describedby`.
+          */}
+          <p
+            id={`essentials-help-${line.title}`}
+            title={ESSENTIALS_LIST}
+            className="mb-2 text-xs text-ink-secondary"
+          >
+            Rice, meat, cooking oil, soap, medicine and the like; taxed at half rate.
+            <span className="sr-only"> The full list: {ESSENTIALS_LIST}</span>
           </p>
           <div
             role="radiogroup"
@@ -1129,8 +1148,17 @@ function FlagCheckbox({
   checked: boolean
   onToggle: () => void
 }) {
+  /*
+   * The hint is one line since 10 November 2026 (the compact pass, three
+   * across): `truncate` clips it on screen only, so a screen reader still
+   * reads it whole, and `title` shows it whole on hover. The label is
+   * never clipped — it is the thing being ticked.
+   */
   return (
-    <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-input-border bg-input/50 px-4 py-3 transition-colors hover:bg-input">
+    <label
+      title={flag.hint}
+      className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-input-border bg-input/50 px-3 py-2 transition-colors hover:bg-input"
+    >
       <input
         type="checkbox"
         checked={checked}
@@ -1139,7 +1167,7 @@ function FlagCheckbox({
       />
       <span className="min-w-0">
         <span className="block text-sm font-semibold text-ink">{flag.label}</span>
-        <span className="block text-xs text-ink-secondary">{flag.hint}</span>
+        <span className="block truncate text-xs text-ink-secondary">{flag.hint}</span>
       </span>
     </label>
   )
@@ -1458,7 +1486,8 @@ export function FeeProfileStep({
    */
 
   return (
-    <div className="space-y-8">
+    /* `space-y-5` (was 8): the compact pass, 10 November 2026. */
+    <div className="space-y-5">
       {/*
         ── The opening paragraph is gone — 6 October 2026 ───────────────────
 
@@ -1651,6 +1680,8 @@ export function FeeProfileStep({
                           value={categoryShown(line.id, cat.category)}
                           onChange={(e) => typeCategory(line.id, e.target.value)}
                           onBlur={() => touch(`line:${line.id}:category`)}
+                          // The API's own cap on fee_profile.lines.*.category.
+                          maxLength={80}
                           placeholder="e.g. Retailer"
                           className={inputCls}
                           aria-invalid={Boolean(errorFor(`line:${line.id}:category`, cat.category))}
@@ -1717,12 +1748,15 @@ export function FeeProfileStep({
                   I have no gross sales to declare for the preceding year.
                 </span>
               </label>
+              {/*
+                One line since 10 November 2026 (it was four). Its two facts
+                stay: an officer then sets a Presumptive Income Level, and an
+                unexplained zero can be denied.
+              */}
               {value.no_gross_sales && (
-                <div className="mt-2.5 rounded-lg border border-s-yellow bg-s-yellow-tint px-4 py-3 text-sm text-amber-800">
-                  <span className="font-bold">Heads up:</span> declaring no gross sales routes your
-                  assessment to an officer for a Presumptive Income Level (PIL) evaluation, and an
-                  unexplained zero declaration can be a ground for denial. Only check this if your
-                  business truly had no sales.
+                <div className="mt-2 rounded-lg border border-s-yellow bg-s-yellow-tint px-3 py-1.5 text-sm text-amber-800">
+                  <span className="font-bold">Heads up:</span> an officer then sets a Presumptive
+                  Income Level, and an unexplained zero can be denied.
                 </div>
               )}
             </div>
@@ -1851,6 +1885,24 @@ export function FeeProfileStep({
               onBlur={() => touch('floor_area_sqm')}
               error={errorFor('floor_area_sqm', value.floor_area_sqm)}
               placeholder="e.g. 45"
+            />
+            {/*
+              No. of Storeys, beside the area it describes (client, 10
+              November 2026: "ask once, lock everywhere"). The CPDD, BFP and
+              OBO sheets show this answer read-only. A sixth of the row like
+              item 1, so on a wide sheet item 4 moves to a row of its own.
+            */}
+            <NumberField
+              className="col-span-12 @xl:col-span-4 @3xl:col-span-2"
+              box="w-full"
+              label={OPERATION_LABELS.storeys}
+              required
+              kind="count"
+              value={value.storeys}
+              onChange={(next) => set('storeys', next)}
+              onBlur={() => touch('storeys')}
+              error={errorFor('storeys', value.storeys)}
+              placeholder="1 to 200"
             />
 
             {/*
@@ -2018,37 +2070,25 @@ export function FeeProfileStep({
       {/*
         ── What is NOT on the paper ──────────────────────────────────────────
 
-        Storeys and the business flags. Four office sheets want the storey count
-        (BPLO, the FSIC sheet, the OBO occupancy sheet and the CPDD locational
-        sheet) and the flags drive Revenue Code rules — but neither appears on
-        MCG-BPLO-FO-001, so neither belongs under the Business Operation heading.
-      */}
-      {/*
-        ── "Number of Storeys" is gone, and the heading with it ──────────────
+        The business flags. They drive Revenue Code rules but do not appear on
+        MCG-BPLO-FO-001, so they do not belong under the Business Operation
+        heading.
 
-        It priced nothing. Measured against a filing holding all six
-        clearances, changing the storey count moved the total by zero pesos:
-        only two active rules read it — a lessor's commercial or residential
-        building, by storey — and both need a Sec. 3A.03 fine permit category
-        that is one of the sixty still open with BPLO, so neither can fire.
-
-        Its one real consumer was MCG-CPDD-FO-003 line VIII.B, "No. of Storey
-        of Building", which used to auto-fill from here. That sheet asks the
-        question itself now, and its field is editable — the same fix the
-        lessor boxes needed when they were removed from this side.
-
-        `storeys` stays on the draft type so a filing saved while this was
-        asked still hydrates, and OfficeFormAnswers still seeds VIII.B from it
-        for exactly those filings. Nothing writes it any more.
-
-        The section heading went with the box: "Building & Premises" described
-        a storey count, not a list of what a business happens to do.
+        The storey count is not on that paper either, and is asked anyway,
+        beside item 1 (client, 10 November 2026: "ask once, lock
+        everywhere"). It left this step on 16 September 2026 because it priced
+        nothing, and the CPDD, BFP and OBO sheets then each asked it for
+        themselves. Now this is the one place it is asked, required, and the
+        three sheets show the answer locked.
       */}
       {onExtras && hasBusiness && (
-        <section>
+        /* Three across on a wide sheet, two between (was two at most): the
+           compact pass, 10 November 2026. By the sheet's width, as the form
+           grids are, since the review step draws this narrower. */
+        <section className="@container">
           <div>
             <FieldLabel optional>Which of these apply to your business?</FieldLabel>
-            <div className="grid gap-2.5 sm:grid-cols-2">
+            <div className="grid gap-2 @xl:grid-cols-2 @4xl:grid-cols-3">
               {BUSINESS_FLAGS.map((f) => (
                 <FlagCheckbox
                   key={f.value}
@@ -2103,8 +2143,11 @@ export function FeeProfileStep({
       {onExtras && showStallCount && (
         <section>
           <h2 className="text-[15px] font-bold text-ink">Market Stall Details</h2>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          {/* The section grid, a count's `short` cell (10 November 2026). */}
+          <div className={`${formGridCls} mt-3`}>
             <NumberField
+              className={formCell.short}
+              box="w-full"
               label="Number of Stalls"
               required
               kind="count"

@@ -45,6 +45,8 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  * and the officer holding the filing may instead reject it with a reason
  * (`reject`). The owner is told in the bell and by e-mail, reads the reason
  * on the Pay page (`latest`), and sends a new one, which tells BPLO again.
+ * Until BPLO acts, the owner cannot send another (client, 10 November 2026;
+ * see `store`).
  */
 class PaymentProofController extends Controller
 {
@@ -61,9 +63,16 @@ class PaymentProofController extends Controller
     public function __construct(private WorkflowService $workflow) {}
 
     /**
-     * The owner sends proof. A second send before BPLO confirms REPLACES the
-     * pending one — the old row is stamped superseded and kept, file and all.
-     * Each send that is kept, a replacement included, tells BPLO.
+     * The owner sends proof. One receipt waits for BPLO at a time (client,
+     * 10 November 2026): while one is pending, another send is refused with
+     * one line, so BPLO hears of each receipt once. Until then a second send
+     * REPLACED the pending one (the old row stamped `superseded_at`) and told
+     * BPLO again, which let an owner spam the bell. Once BPLO rejects the
+     * receipt it is no longer pending, so the owner may send a new one.
+     *
+     * Older filings may already hold several pending rows from the replace
+     * era; `PaymentProof::pendingFor` answers the newest of them, so they
+     * still read as one receipt waiting.
      */
     public function store(Request $request, Application $application): JsonResponse
     {
@@ -80,6 +89,9 @@ class PaymentProofController extends Controller
          * nothing anyone can act on.
          */
         $this->refuseWhenNothingIsOwed($application);
+
+        // Before anything is checked or stored: a second receipt is refused whatever it holds.
+        $this->refuseWhileOneIsPending($application);
 
         $data = $request->validate([
             // The pair is one answer: an OR number means nothing without its date.
@@ -101,8 +113,17 @@ class PaymentProofController extends Controller
         $stored = $photo instanceof UploadedFile ? self::storePhoto($photo, $application) : null;
 
         $proof = DB::transaction(function () use ($application, $request, $data, $orNumber, $stored) {
-            $replaced = PaymentProof::pendingFor($application);
-            $replaced?->update(['superseded_at' => now()]);
+            /*
+             * Asked again here for a double press: the first send may have
+             * committed while this one was storing its photo. The photo this
+             * send stored is removed, since no row will ever point at it.
+             */
+            if (PaymentProof::pendingFor($application) !== null) {
+                if ($stored !== null) {
+                    Storage::disk('local')->delete($stored['file_path']);
+                }
+                $this->refuseWhileOneIsPending($application);
+            }
 
             $proof = PaymentProof::create([
                 'application_id' => $application->id,
@@ -116,8 +137,8 @@ class PaymentProofController extends Controller
 
             /*
              * Who, when (the row's own), which filing, which fields and which
-             * file — and the proof it replaced, so the trail reads as one story
-             * rather than two unrelated submissions.
+             * file. No `replaces_proof_id` any more: nothing is replaced since
+             * 10 November 2026, though older rows still carry it.
              */
             Audit::log('payment_proof.submitted', $proof, [
                 'application_id' => $application->id,
@@ -125,7 +146,6 @@ class PaymentProofController extends Controller
                 'or_number' => $proof->or_number,
                 'or_date' => optional($proof->or_date)->toDateString(),
                 'file' => $proof->original_filename,
-                'replaces_proof_id' => $replaced?->id,
             ]);
 
             /*
@@ -285,6 +305,20 @@ class PaymentProofController extends Controller
     {
         return $application->applicant_user_id === $user->id
             || $user->hasPermission('application.view_any_office');
+    }
+
+    /**
+     * One receipt waits for BPLO at a time (client, 10 November 2026). A
+     * rejected one is not pending (PaymentProof::pendingFor), so the owner
+     * may send again after a rejection.
+     */
+    private function refuseWhileOneIsPending(Application $application): void
+    {
+        if (PaymentProof::pendingFor($application) !== null) {
+            throw ValidationException::withMessages([
+                'proof' => ['Your receipt is already with BPLO.'],
+            ]);
+        }
     }
 
     /** PaymentController::pay's three refusals, in its words, before anything is kept. */

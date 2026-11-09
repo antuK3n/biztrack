@@ -1204,15 +1204,18 @@ test('an answer that is not a road is not used as a pin', async ({ page }) => {
   await expect(page.getByText(/pin placed/i)).toBeHidden()
 })
 
-test('the zoning step says to choose the barangay first, before the map', async ({ page }) => {
+test('the zoning step says to choose the barangay first, beside its select and before the map', async ({ page }) => {
   /*
    * The pin is checked against the chosen barangay (onPick refuses a pin
    * outside it; a new barangay removes a pin that contradicts it), so the
-   * order is said before the map is touched. In the amber note, not red:
-   * nothing is wrong yet.
+   * order is said before the map is touched. Not red: nothing is wrong yet.
+   *
+   * In the one-line rule beside the Barangay select since 10 November 2026,
+   * when the barangay and the map became one card (client, "Merge cards,
+   * shared grid"); it was in the amber pin note, which is one line now too.
    */
   await goToZoningStep(page)
-  const note = page.locator('#pin-accuracy-note')
+  const note = page.locator('#barangay-pin-hint')
   await expect(note).toContainText(/choose your barangay first/i)
   await expect(note).toContainText(/your pin has to be inside it/i)
   const colour = await note.evaluate((el) => getComputedStyle(el).color)
@@ -1228,8 +1231,9 @@ for (const width of [1440, 390]) {
     page,
   }) => {
     /*
-     * Ken's layout (27 September 2026): one column of numbered steps — trade,
-     * barangay, pin, address, emergency contact — at every width. Asserted by
+     * Ken's layout (27 September 2026): one column of numbered steps, at
+     * every width. Three since 10 November 2026 (client, "Merge cards, shared
+     * grid"): trade; barangay and pin; address and emergency contact. Asserted by
      * position rather than by DOM order, because a grid can put a later element
      * beside an earlier one and the order on screen is what people follow. And
      * no sideways scroll at phone width: a map or a card wider than the screen
@@ -1239,10 +1243,8 @@ for (const width of [1440, 390]) {
     await goToZoningStep(page)
     const titles = [
       /line of business/i,
-      /^step 2: barangay/i,
-      /pin your business on the map/i,
-      /^step 4: address/i,
-      /in case of emergency/i,
+      /^step 2: barangay and map pin/i,
+      /^step 3: address and emergency contact/i,
     ]
     let previous = -Infinity
     for (const [index, title] of titles.entries()) {
@@ -1253,10 +1255,12 @@ for (const width of [1440, 390]) {
       expect(top, `step ${index + 1} sits below step ${index}`).toBeGreaterThan(previous)
       previous = top
     }
-    // The map is inside step 3, and the address fields inside step 4.
-    await expect(page.getByTestId('location-step-3').locator('.leaflet-container')).toBeVisible()
-    await expect(page.getByTestId('location-step-4').getByLabel(/^street/i)).toBeVisible()
-    await expect(page.getByTestId('location-step-5').getByLabel(/emergency contact person/i)).toBeVisible()
+    // The barangay and the map are inside step 2; the address and the
+    // emergency contact inside step 3.
+    await expect(page.getByTestId('location-step-2').getByLabel(/barangay name/i)).toBeVisible()
+    await expect(page.getByTestId('location-step-2').locator('.leaflet-container')).toBeVisible()
+    await expect(page.getByTestId('location-step-3').getByLabel(/^street/i)).toBeVisible()
+    await expect(page.getByTestId('location-step-3').getByLabel(/emergency contact person/i)).toBeVisible()
 
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,

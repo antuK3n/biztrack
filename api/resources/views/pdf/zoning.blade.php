@@ -38,6 +38,7 @@
             @if($qr)
                 <img src="{{ $qr }}" alt="Verification QR code">
                 <div class="caption">Scan to verify</div>
+                <div class="qr-note">Validity is confirmed only by scanning this QR.</div>
             @endif
         </td>
     </tr>
@@ -45,9 +46,7 @@
 
 <div class="zoning-title">ZONING CLEARANCE</div>
 <div class="zoning-subtitle">(For Business Permit)</div>
-@if($status_label && $status_label !== 'Active')
-    <div class="status">{{ strtoupper($status_label) }}</div>
-@endif
+@include('pdf.partials.status-mark')
 
 <div class="zoning-box">
     <table class="zoning-line">

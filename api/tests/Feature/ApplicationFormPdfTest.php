@@ -171,6 +171,17 @@ it('prints each office sheet the applicant filled in', function (string $code, a
     'occupancy' => ['OCCUPANCY', ['application_type' => 'Full', 'building_permit_no' => 'BP-77'], 'UNIFIED APPLICATION FORM FOR CERTIFICATE OF OCCUPANCY'],
 ]);
 
+it('prints the business’s number as the OBO Tel. No., which the sheet no longer asks', function () {
+    // Client, 10 November 2026: the asked Tel. No. went; the sheet shows the
+    // business's own number, and the paper prints that one.
+    $app = printableFiling('new', ['OCCUPANCY'], ['OCCUPANCY' => ['application_type' => 'Full']]);
+
+    authAs('bplo@biztrack.local');
+    $res = $this->get("/api/v1/applications/{$app->id}/office-forms/OCCUPANCY/pdf")->assertOk();
+
+    expect(pdfText($res->getContent()))->toContain('+639171234567');
+});
+
 it('lets a clearance office print the business permit form and its own sheet, never another office\'s', function () {
     $app = printableFiling('new', ['SANITARY', 'FSIC'], [
         'SANITARY' => ['sanitary_classification' => 'Food Establishment'],

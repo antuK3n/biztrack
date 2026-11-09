@@ -654,6 +654,8 @@ export function PermitsPage({
    */
   const [viewing, setViewing] = useState<number | null>(null)
   const [viewError, setViewError] = useState<string | null>(null)
+  /* The row whose certificate is being saved, keyed by id for the same reason. */
+  const [downloading, setDownloading] = useState<number | null>(null)
   /*
    * The row whose Change status or Status history dialog is open. Whole rows,
    * so each dialog names the certificate and the business it acts on.
@@ -840,6 +842,25 @@ export function PermitsPage({
       setViewError(toApiError(err).message)
     } finally {
       setViewing(null)
+    }
+  }
+
+  /**
+   * Download — save the same certificate as a file (client, 10 November 2026),
+   * through the endpoint the owner's PDF button uses. A failure lands in the
+   * View banner above the table: one place to read why a certificate would not
+   * come, whichever button asked.
+   */
+  async function download(permit: PermitRegisterRow) {
+    if (downloading === permit.id) return
+    setDownloading(permit.id)
+    setViewError(null)
+    try {
+      await permits.pdf(permit.id, `${permit.permit_number}.pdf`)
+    } catch (err) {
+      setViewError(toApiError(err).message)
+    } finally {
+      setDownloading(null)
     }
   }
 
@@ -1324,21 +1345,36 @@ export function PermitsPage({
                       </td>
                     )}
                     <td className="whitespace-nowrap px-3 py-2 text-right">
-                      <button
-                        type="button"
-                        onClick={() => view(permit)}
-                        /*
-                         * Twenty-five buttons reading "View" are twenty-five
-                         * identical stops for a screen reader (AGENTS.md §6.2),
-                         * so the permit number goes in the accessible name and
-                         * the visible label stays one word.
-                         */
-                        aria-label={`View certificate ${permit.permit_number}`}
-                        aria-disabled={viewing === permit.id || undefined}
-                        className="rounded-full border border-royal px-3 py-1 text-xs font-semibold text-royal hover:bg-royal hover:text-white aria-disabled:cursor-wait aria-disabled:opacity-50"
-                      >
-                        {viewing === permit.id ? 'Opening…' : 'View'}
-                      </button>
+                      {/* Side by side: two one-word pills sit narrower than a stack is tall. */}
+                      <div className="inline-flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => view(permit)}
+                          /*
+                           * Twenty-five buttons reading "View" are twenty-five
+                           * identical stops for a screen reader (AGENTS.md §6.2),
+                           * so the permit number goes in the accessible name and
+                           * the visible label stays one word.
+                           */
+                          aria-label={`View certificate ${permit.permit_number}`}
+                          aria-disabled={viewing === permit.id || undefined}
+                          className="rounded-full border border-royal px-3 py-1 text-xs font-semibold text-royal hover:bg-royal hover:text-white aria-disabled:cursor-wait aria-disabled:opacity-50"
+                        >
+                          {viewing === permit.id ? 'Opening…' : 'View'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => download(permit)}
+                          // `aria-disabled`, never `disabled`: a disabled button
+                          // leaves the tab order mid-download. The guard in
+                          // `download` stops the second press instead.
+                          aria-label={`Download certificate ${permit.permit_number}`}
+                          aria-disabled={downloading === permit.id || undefined}
+                          className="rounded-full border border-royal px-3 py-1 text-xs font-semibold text-royal hover:bg-royal hover:text-white aria-disabled:cursor-wait aria-disabled:opacity-50"
+                        >
+                          {downloading === permit.id ? 'Preparing…' : 'Download'}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

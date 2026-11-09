@@ -234,6 +234,32 @@ function isPastPermit(permit: Permit): boolean {
 }
 
 /**
+ * The newest permit of each type, superseded ones left out — the only permits
+ * a business card's heading reads [client, 10 November 2026].
+ *
+ * Newest is the latest `valid_until`, then the latest `valid_from`, then the
+ * higher id. A permit with no `valid_until` sorts as oldest.
+ */
+export function newestPerType(permits: Permit[]): Permit[] {
+  const newest = new Map<string, Permit>()
+  for (const permit of permits) {
+    if (permit.status === 'superseded') continue
+    const type = permit.permit_type?.code ?? ''
+    const held = newest.get(type)
+    if (!held || isNewer(permit, held)) newest.set(type, permit)
+  }
+  return [...newest.values()]
+}
+
+function isNewer(a: Permit, b: Permit): boolean {
+  const until = (a.valid_until ?? '').localeCompare(b.valid_until ?? '')
+  if (until !== 0) return until > 0
+  const from = (a.valid_from ?? '').localeCompare(b.valid_from ?? '')
+  if (from !== 0) return from > 0
+  return a.id > b.id
+}
+
+/**
  * One issued permit, on the card's grid.
  *
  * The status is a tinted, worded chip (Never Color Alone): an expired permit
@@ -744,62 +770,82 @@ export function useHoldings(enabled: boolean) {
     }
 
     for (const permit of data?.permits ?? []) {
-      const group = groupFor(permit.business as Permit['business'] | null)
-      group.permits.push(permit)
+      groupFor(permit.business as Permit['business'] | null).permits.push(permit)
+    }
 
-      /*
-       * ── A replaced permit no longer has an expiry worth announcing ──────
-       *
-       * `superseded` is what a renewal leaves behind, and the row stays on
-       * the list on purpose — the applicant keeps last year's certificate and
-       * can still download it. What it must not do is drive the DATE in the
-       * heading, and it was: a shop that renewed its Sanitary Permit on
-       * 4 October 2026 was still told *"Nearing Permit Expiration: October
-       * 23, 2026"* — the date on the certificate it had just replaced — while
-       * the new one sat in the same list, unexpired, a few rows above
-       * [client, 4 October 2026]. It reads as the renewal having done
-       * nothing.
-       *
-       * The same mistake as the `flagged` filter below, caught a fortnight
-       * later in the arithmetic instead of the wording: superseded is a
-       * historical record, not a live holding.
-       *
-       * Only superseded. A SUSPENDED permit still expires and the owner still
-       * needs telling, and an expired one is what `expired` is for.
-       */
-      if (permit.status === 'superseded') continue
+    /*
+     * ── Each permit type is judged by its newest permit ─────────────────
+     *
+     * A business renewed for 2026 still read *"Permit expired · December 31,
+     * 2025"* on its card, with every permit on it Active. The 2025 permit had
+     * lapsed BEFORE the renewal, and a lapsed permit keeps its own `expired`
+     * status and true expiry rather than becoming `superseded` (WorkflowService)
+     * — so skipping superseded alone let it set `expired` and the date. The
+     * row list already files it under Past.
+     *
+     * So the heading reads only the newest permit of each type; an older one of
+     * a type that has a newer one never counts [client, 10 November 2026]. By
+     * type rather than by renewal link, so old-register (imported) permits are
+     * covered too. A sanction on the newest permit still counts.
+     */
+    for (const group of map.values()) {
+      for (const permit of newestPerType(group.permits)) {
+        /*
+         * ── A replaced permit no longer has an expiry worth announcing ──────
+         *
+         * `superseded` is what a renewal leaves behind, and the row stays on
+         * the list on purpose — the applicant keeps last year's certificate and
+         * can still download it. What it must not do is drive the DATE in the
+         * heading, and it was: a shop that renewed its Sanitary Permit on
+         * 4 October 2026 was still told *"Nearing Permit Expiration: October
+         * 23, 2026"* — the date on the certificate it had just replaced — while
+         * the new one sat in the same list, unexpired, a few rows above
+         * [client, 4 October 2026]. It reads as the renewal having done
+         * nothing.
+         *
+         * The same mistake as the `flagged` filter below, caught a fortnight
+         * later in the arithmetic instead of the wording: superseded is a
+         * historical record, not a live holding.
+         *
+         * Only superseded. A SUSPENDED permit still expires and the owner still
+         * needs telling, and an expired one is what `expired` is for.
+         *
+         * (newestPerType already leaves superseded out; this stays as the guard.)
+         */
+        if (permit.status === 'superseded') continue
 
-      /*
-       * Nor the Occupancy Permit's date for expiry: it never expires, and its
-       * `valid_until` is the next yearly inspection (lib/permitTerm.ts). Its
-       * sanction still counts below.
-       */
-      const expires = permitExpires(permit)
-      if (expires && permit.valid_until) {
-        if (!group.latestExpiry || permit.valid_until > group.latestExpiry) group.latestExpiry = permit.valid_until
-        if (!group.soonestExpiry || permit.valid_until < group.soonestExpiry) group.soonestExpiry = permit.valid_until
+        /*
+         * Nor the Occupancy Permit's date for expiry: it never expires, and its
+         * `valid_until` is the next yearly inspection (lib/permitTerm.ts). Its
+         * sanction still counts below.
+         */
+        const expires = permitExpires(permit)
+        if (expires && permit.valid_until) {
+          if (!group.latestExpiry || permit.valid_until > group.latestExpiry) group.latestExpiry = permit.valid_until
+          if (!group.soonestExpiry || permit.valid_until < group.soonestExpiry) group.soonestExpiry = permit.valid_until
+        }
+        const days = expires ? permit.days_until_expiry : null
+        if (days !== null && days < 0) group.expired = true
+        if (days !== null && days >= 0 && days <= NEARING_DAYS) group.nearing = true
+        /*
+         * ── Flagged means SANCTIONED, not merely inactive ─────────────────
+         *
+         * This read `status !== 'active'`, which is every state but one —
+         * including `superseded`, which every renewal produces by design. A
+         * shop that renewed its sanitary permit in September holds last
+         * year's superseded certificate, and the filter above called that
+         * "Suspended or revoked".
+         *
+         * It cost nothing while nothing was ever suspended. Since
+         * 24 September 2026 a refused clearance suspends the business permit,
+         * so the filter is about to be used for real and has to mean what it
+         * says. Expired is excluded for its own reason: `expired` above
+         * already carries it, and a lapsed permit is a date passing rather
+         * than a decision anybody took.
+         */
+        if (permit.status === 'suspended' || permit.status === 'revoked' || permit.status === 'rejected')
+          group.flagged = true
       }
-      const days = expires ? permit.days_until_expiry : null
-      if (days !== null && days < 0) group.expired = true
-      if (days !== null && days >= 0 && days <= NEARING_DAYS) group.nearing = true
-      /*
-       * ── Flagged means SANCTIONED, not merely inactive ─────────────────
-       *
-       * This read `status !== 'active'`, which is every state but one —
-       * including `superseded`, which every renewal produces by design. A
-       * shop that renewed its sanitary permit in September holds last
-       * year's superseded certificate, and the filter above called that
-       * "Suspended or revoked".
-       *
-       * It cost nothing while nothing was ever suspended. Since
-       * 24 September 2026 a refused clearance suspends the business permit,
-       * so the filter is about to be used for real and has to mean what it
-       * says. Expired is excluded for its own reason: `expired` above
-       * already carries it, and a lapsed permit is a date passing rather
-       * than a decision anybody took.
-       */
-      if (permit.status === 'suspended' || permit.status === 'revoked' || permit.status === 'rejected')
-        group.flagged = true
     }
 
     /*

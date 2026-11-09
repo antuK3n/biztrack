@@ -4,6 +4,7 @@ use App\Enums\PaymentMethod;
 use App\Enums\PaymentStatus;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
+use App\Models\ApplicationDocument;
 use App\Models\ApplicationOfficeForm;
 use App\Models\AuditLog;
 use App\Models\Barangay;
@@ -18,6 +19,7 @@ use App\Models\PsicCode;
 use App\Models\User;
 use App\Support\Numbering;
 use App\Support\PermitFace;
+use App\Support\SheetRequirements;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
 use Smalot\PdfParser\Parser;
@@ -550,11 +552,28 @@ it('draws the Certificate of Occupancy on Malabon’s NBC Form B-13', function (
         ['form_data' => [
             'building_permit_no' => 'BP-MLB-2024-0318', 'building_permit_date' => '2024-03-18', 'project_name' => 'Two-storey Commercial Building',
             // The left page's own lines [client, 27 October 2026].
-            'completion_documents' => 'Certificate of Completion, As-built Plans/Specifications',
             'completion_submitted_by' => 'Engr. Paolo R. Mendiola',
             'completion_professional' => 'Civil Engineer',
+            // OBO's own "Others" entry; a typed Documents Submitted is ignored.
+            'completion_other_document' => 'Structural analysis',
+            'completion_documents' => 'Daily Construction Works Logbook',
         ]],
     );
+    /*
+     * Documents Submitted is ticked from the sheet's uploads [client,
+     * 10 November 2026]: the Certificate of Completion and the as-built plans
+     * are attached, the logbook is not.
+     */
+    foreach (['OCC_REQ_COMPLETION', 'OCC_REQ_AS_BUILT'] as $slot) {
+        ApplicationDocument::create([
+            'application_id' => $seed->application_id,
+            'document_type_id' => SheetRequirements::documentType('OCCUPANCY', $slot)->id,
+            'original_filename' => strtolower($slot).'.pdf',
+            'stored_path' => 'private/documents/test/'.strtolower($slot).'.pdf',
+            'mime_type' => 'application/pdf',
+            'size_bytes' => 1024,
+        ]);
+    }
     OfficeSignatory::updateOrCreate(
         ['department_id' => $occupancy->issuing_department_id, 'role' => 'Building Official'],
         ['name' => 'Engr. Carlos M. Dela Paz', 'sort_order' => 1, 'is_active' => true],
@@ -568,6 +587,10 @@ it('draws the Certificate of Occupancy on Malabon’s NBC Form B-13', function (
         ->and($cert['occ_building_permit_date'])->toBe('March 18, 2024')
         ->and($cert['occ_project'])->toBe('Two-storey Commercial Building')
         ->and($cert['occ_zoning_no'])->toBe($zoning->permit_number)
+        ->and($cert['occ_documents'])->toBe(['Certificate of Completion', 'As-built Plans/Specifications', 'Others'])
+        ->and($cert['occ_other_document'])->toBe('Structural analysis')
+        ->and($cert['occ_submitted_by'])->toBe('Engr. Paolo R. Mendiola')
+        ->and($cert['occ_professional'])->toBe('Civil Engineer')
         ->and($cert['signatories'])->toBe([['role' => 'Building Official', 'name' => 'Engr. Carlos M. Dela Paz']]);
 
     authAs('owner@biztrack.local');

@@ -139,21 +139,64 @@ final class OtherRequirementRules
         ));
     }
 
+    /*
+     * ── The blank TIN, told before the press (client, 10 November 2026) ──────
+     *
+     * *"TIN as other requirements is probably missing."* It was not missing
+     * from the system — `WorkflowService::raiseTinRequirement` asked for it —
+     * but it was asked only at BPLO approval, and the wizard's list of what
+     * the filing will also need never named it. The client's choice: raise it
+     * at submit, and show it here beside the rules when item 3 is blank.
+     *
+     * Not a ROW of the table, because it is not a fact of what the business
+     * does — no flag turns it on, and `raisable` must never raise it under a
+     * `rule.` key beside the one the TIN answer field is wired to
+     * (`WorkflowService::TIN_REQUIREMENT_KEY`). One title and one opening
+     * sentence serve both the preview and the requirement, so the applicant
+     * is told before the press in the words they are later asked in. The TIN
+     * itself stays optional on the form (BPLO's rule, 24 September 2026).
+     */
+
+    /** The preview key for the blank TIN; never stored as a `system_key`. */
+    public const TIN_KEY = 'tin';
+
+    /** The title the TIN requirement carries, and the preview with it. */
+    public const TIN_TITLE = 'Tax Identification Number (TIN)';
+
+    /** The requirement's opening sentences, which the preview repeats. */
+    public const TIN_SUMMARY = 'You left the Tax Identification Number (TIN) blank on your application form. '
+        .'It is the TIN of the owner or the registered entity, as printed on your BIR papers, like 123-456-789-000.';
+
     /**
      * The rows the wizard shows before submission: what the filing will also
      * need, and whether anything is asked of the applicant afterwards.
      *
+     * `$asksForTin` adds the blank-TIN row last, under the same condition
+     * submit raises it on (`WorkflowService::asksForTin`).
+     *
      * @return list<array{key: string, title: string, article: string, summary: string, asks: bool}>
      */
-    public static function preview(array $profile): array
+    public static function preview(array $profile, bool $asksForTin = false): array
     {
-        return array_map(fn (array $row) => [
+        $rows = array_map(fn (array $row) => [
             'key' => $row['key'],
             'title' => $row['title'],
             'article' => $row['article'],
             'summary' => $row['summary'],
             'asks' => $row['request_type'] !== null,
         ], self::matching($profile));
+
+        if ($asksForTin) {
+            $rows[] = [
+                'key' => self::TIN_KEY,
+                'title' => self::TIN_TITLE,
+                'article' => 'Section A, item 3',
+                'summary' => self::TIN_SUMMARY,
+                'asks' => true,
+            ];
+        }
+
+        return $rows;
     }
 
     /**

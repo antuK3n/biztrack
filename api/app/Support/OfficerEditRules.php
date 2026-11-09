@@ -77,8 +77,14 @@ final class OfficerEditRules
      */
     public const BUSINESS_OFFICE_USE = ['evaluator_remarks'];
 
-    /** Group 1 on an office's own sheet: the dates only the office can know. */
-    public const SHEET_OFFICE_USE = ['building_permit_date', 'fsec_date', 'date_issued'];
+    /**
+     * Group 1 on an office's own sheet: the dates only the office can know,
+     * and OBO's "Others (specify)" on NBC Form B-13's Documents Submitted —
+     * moved off the owner's sheet to the officer's on 10 November 2026
+     * (client): what else was handed in is the office's to record. The
+     * owner's save keeps none of these (OfficeFormController::upsert).
+     */
+    public const SHEET_OFFICE_USE = ['building_permit_date', 'fsec_date', 'date_issued', 'completion_other_document'];
 
     /**
      * Group 2 on each office's own sheet: the contact and address lines the
@@ -88,7 +94,16 @@ final class OfficerEditRules
      * @var array<string, list<string>>
      */
     public const SHEET_CLERICAL = [
-        'OCCUPANCY' => ['project_name', 'project_location', 'owner_address', 'owner_zip', 'owner_tel'],
+        /*
+         * The engineer or architect who signed the Certificate of Completion,
+         * and which of the two they are: copied by the owner off a sealed
+         * page, so a misspelt name is a clerical slip OBO may fix with a
+         * reason (client, 10 November 2026).
+         */
+        'OCCUPANCY' => [
+            'project_name', 'project_location', 'owner_address', 'owner_zip', 'owner_tel',
+            'completion_submitted_by', 'completion_professional',
+        ],
         'CEC' => ['owner_address'],
         'ZONING' => [],
         'SANITARY' => [],
@@ -116,6 +131,8 @@ final class OfficerEditRules
         'owner_address' => 'owner address',
         'owner_zip' => 'ZIP code',
         'owner_tel' => 'telephone',
+        'completion_submitted_by' => 'engineer / architect who signed the Certificate of Completion',
+        'completion_professional' => 'profession of that engineer / architect',
     ];
 
     /** The 422s, one line each, under fifty characters. */

@@ -60,7 +60,7 @@ final class RenewalPrefill
      * against it in `RenewalPrefillTest` — two lists, one test, rather than a
      * shared constant that would make a controller's private detail public.
      */
-    public const OFFICER_KEYS = ['building_permit_date', 'fsec_date', 'date_issued'];
+    public const OFFICER_KEYS = ['building_permit_date', 'fsec_date', 'date_issued', 'completion_other_document'];
 
     /**
      * Answers that are an ACT of the applicant rather than a fact about them.

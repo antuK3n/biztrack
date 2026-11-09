@@ -27,6 +27,12 @@
  */
 export const OPERATION_LABELS = {
   floor_area_sqm: '1. Business Area (sq. m.)',
+  /*
+   * Not on MCG-BPLO-FO-001, so it carries no item number; asked here because
+   * the CPDD, BFP and OBO papers all print it and show this answer locked
+   * (client, 10 November 2026: "ask once, lock everywhere").
+   */
+  storeys: 'No. of Storeys',
   employees: '2. Total No. of Employees',
   male_employees: '2a. No. of Male Employees',
   female_employees: '2b. No. of Female Employees',
@@ -56,6 +62,9 @@ export const OPERATION_LABELS = {
  */
 export function inItemOrder(labels: readonly string[]): string[] {
   const key = (label: string): [number, string] | null => {
+    // Unnumbered but drawn beside item 1, so listed after it (10 November
+    // 2026). '~' sorts after item 1's own '' (item 1 has no lettered parts).
+    if (label === OPERATION_LABELS.storeys) return [1, '~']
     const match = /^(\d+)([a-z]?)\.\s/.exec(label)
     return match ? [Number(match[1]), match[2]] : null
   }

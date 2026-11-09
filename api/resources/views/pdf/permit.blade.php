@@ -70,14 +70,37 @@
          * document: the download looked like a form, the screen like a
          * certificate. */
         .title { text-align: center; font-family: "DejaVu Serif", serif; font-size: 22px; letter-spacing: 5px; margin: 22px 0 0; color: #1a1a1a; }
-        /* Status only shows when it is something other than "Active": a permit
-           that is expired or revoked must say so on its own face, or a stale
-           download passes for a current one. */
-        .status { text-align: center; font-size: 11px; font-weight: bold; letter-spacing: 2px; color: #bd0000; margin-top: 4px; }
-        /* Suspended prints as a boxed banner with its date (client, 5 October
-           2026: "the PDF prints SUSPENDED"). The small line above was easy to
-           miss on a certificate taped to a wall. */
-        .status.banner { font-size: 16px; border: 2px solid #bd0000; padding: 6px 10px; margin: 10px 70px 0; }
+        /* A permit out of force says so on its own face, or a stale download
+           passes for a current one (partials/status-mark). Every status now
+           prints the boxed, dated banner Suspended got on 5 October 2026
+           [client, 10 November 2026]: the 11px red word the others printed
+           named the status but not since when, and was easy to miss on a
+           certificate taped to a wall. Kept to one tight line: the Mayor's
+           Permit and the Sanitary Permit fill their frames, and a taller box
+           pushed their last lines out of it. The watermark does the shouting. */
+        .status { text-align: center; font-weight: bold; letter-spacing: 2px; color: #bd0000; }
+        .status.banner { font-size: 10.5px; line-height: 1.2; border: 1.5px solid #bd0000; padding: 2px 8px; margin: 4px 90px 0; }
+        /* The Mayor's Permit fills its frame, so the banner's height is taken
+           back from the title's top margin and the Remarks box (`marked` on
+           body is set by any status mark); without it the expiry line under
+           the enforcement terms fell across the frame. */
+        body.mayors.marked .title { margin-top: 4px; }
+        body.mayors.marked .remarks-box.ruled { height: 28px; }
+        .status.banner.occ-banner { font-size: 8.5px; letter-spacing: 0.5px; padding: 2px 4px; margin: 6px 0 0; }
+        /* The watermark across the page. Fixed, so dompdf places it against
+           the page box; a full-width line rotated about its centre, so it
+           crosses the middle of the sheet on portrait and landscape alike.
+           Pale enough that every field under it still reads. */
+        .watermark {
+            position: fixed;
+            top: 42%; left: 0; right: 0;
+            text-align: center;
+            font-size: 96px; font-weight: bold; letter-spacing: 8px;
+            color: #bd0000; opacity: 0.13;
+            transform: rotate(-30deg);
+        }
+        /* Under the QR: the paper alone proves nothing [client, 10 November 2026]. */
+        .qr-note { font-size: 6.5px; line-height: 1.25; color: #777; margin-top: 2px; }
 
         table.fields { width: 100%; border-collapse: separate; border-spacing: 0 7px; margin-top: 18px; }
         table.fields td { vertical-align: middle; }
@@ -417,7 +440,7 @@
 </head>
 {{-- `mayors` scopes the City-scale type rules above to the Mayor's Permit;
      $mayors itself is only defined further down, so the raw flag is read here. --}}
-<body class="{{ ($is_business_permit ?? false) ? 'mayors' : (($is_cenro_certificate ?? false) ? 'cenro' : (($is_fsic ?? false) ? 'fsic' : (($is_zoning ?? false) ? 'zoning' : (($is_sanitary ?? false) ? 'sanitary' : (($is_occupancy ?? false) ? 'occupancy' : ''))))) }}">
+<body class="{{ ($is_business_permit ?? false) ? 'mayors' : (($is_cenro_certificate ?? false) ? 'cenro' : (($is_fsic ?? false) ? 'fsic' : (($is_zoning ?? false) ? 'zoning' : (($is_sanitary ?? false) ? 'sanitary' : (($is_occupancy ?? false) ? 'occupancy' : ''))))) }}{{ ! empty($status_mark) ? ' marked' : '' }}">
 <div class="sheet">
 @if($is_occupancy ?? false)
     @include('pdf.occupancy')
@@ -469,6 +492,7 @@
                 @if($qr)
                     <img src="{{ $qr }}" alt="Verification QR code">
                     <div class="caption">Scan to verify</div>
+                    <div class="qr-note">Validity is confirmed only by scanning this QR.</div>
                 @endif
             </td>
         </tr>
@@ -479,6 +503,7 @@
              than in a field grid: title, number, "is hereby issued to", the
              business, its trade and address, then the compliance clause. --}}
         <div class="title cenro-title">CERTIFICATE OF ENVIRONMENT CLEARANCE</div>
+        @include('pdf.partials.status-mark')
         <div class="cenro-number">{{ $permit_number }}</div>
         <div class="cenro-issued-to">is hereby issued to</div>
         <div class="cenro-business">{{ $business_name ?: 'Business removed from register' }}</div>
@@ -494,11 +519,7 @@
         <div class="cenro-dated">Issued this {{ $valid_from }} at the Malabon City Hall.</div>
     @else
         <div class="title">{{ strtoupper($permit_type_name) }}</div>
-    @endif
-    @if($status_label === 'Suspended')
-        <div class="status banner">SUSPENDED{{ !empty($suspended_on) ? ' — '.strtoupper($suspended_on) : '' }}</div>
-    @elseif($status_label && $status_label !== 'Active')
-        <div class="status">{{ strtoupper($status_label) }}</div>
+        @include('pdf.partials.status-mark')
     @endif
 
     @php

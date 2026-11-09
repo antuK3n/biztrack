@@ -18,9 +18,12 @@ use Illuminate\Support\Carbon;
  *                fills `payment_id`. Sending proof never marks the bill paid.
  *   the officer  a photo attached at Mark as paid, born linked to the payment.
  *
- * Rows are never deleted. An owner who sends again before BPLO confirms
- * replaces the pending proof: the old row is stamped `superseded_at` and kept,
- * with its file and its audit row.
+ * Rows are never deleted. One proof waits for BPLO at a time (client,
+ * 10 November 2026): while one is pending the owner's next send is refused
+ * (PaymentProofController::store). Before that a second send replaced the
+ * pending proof, stamping the old row `superseded_at`; those rows are kept,
+ * and nothing stamps `superseded_at` now. A filing left with several pending
+ * rows from then reads as one: `pendingFor()` answers the newest.
  *
  * BPLO can also reject the pending proof, with a reason (Ken, 3 November
  * 2026): the row is stamped `rejected_at`, `rejected_by_user_id` and
