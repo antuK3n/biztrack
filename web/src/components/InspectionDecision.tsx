@@ -6,7 +6,7 @@ import { toApiError } from '../lib/api'
 import { formatCalendarDate, formatDate, formatDateTime } from '../lib/format'
 import { inspections as inspectionsApi } from '../lib/resources'
 import { useAuth } from '../stores/auth'
-import type { Inspection, InspectorSuggestion } from '../lib/types'
+import type { ApplicationType, Inspection, InspectorSuggestion } from '../lib/types'
 
 /*
  * The site visit, decided from wherever the officer opened the filing.
@@ -1354,6 +1354,7 @@ function FirstInspectionCard({
 export function InspectionDecisionPanel({
   inspections,
   filingStatus,
+  applicationType,
   onChanged,
   book,
   className = '',
@@ -1369,6 +1370,12 @@ export function InspectionDecisionPanel({
    * changed to fix. Better to make every caller say it.
    */
   filingStatus: string
+  /**
+   * The FILING's type. Required for the same reason as `filingStatus`: it
+   * decides whether an OBO pass asks for the certificate's names
+   * (`namesOnPass`), and the visits handed in here carry no `application`.
+   */
+  applicationType: ApplicationType
   onChanged: () => void
   /**
    * The reader's OWN clearance, awaiting its first visit — absent when there is
@@ -1445,6 +1452,23 @@ export function InspectionDecisionPanel({
     const mineCode = user?.department?.code
     const theirs = item.department?.code
     return Boolean(mineCode && theirs && mineCode === theirs)
+  }
+
+  /*
+   * Does passing this visit release a Certificate of Occupancy, so the OBO
+   * confirms its names first (CertificateNamesConfirm)?
+   *
+   * Mirrors InspectionController::occupancyTypeFor: the OBO's visit, except
+   * on the yearly Occupancy inspection, which prints no certificate and
+   * confirms no names (client, 3 November 2026, on merging rupert-8 with
+   * mike-4: "History only, keep the CoO"). That decision reached the API but
+   * not this screen, so the yearly visit opened the names dialog with no
+   * names in it, sent an empty list, and the API refused the pass
+   * (BIZ-2026-00091 and 00092). It now takes the plain Approve, as it did
+   * before the names dialog existed.
+   */
+  function namesOnPass(item: Inspection): boolean {
+    return item.department?.code === 'OBO' && applicationType !== 'annual_inspection'
   }
 
   /**
@@ -1858,7 +1882,7 @@ export function InspectionDecisionPanel({
         (ReviewPage). It was one click with no way back: passing the visit
         issues the office's permit at once.
       */}
-      {approving && approving.department?.code === 'OBO' && (
+      {approving && namesOnPass(approving) && (
         <CertificateNamesConfirm
           item={approving}
           submitting={busyId === approving.id}
@@ -1874,7 +1898,7 @@ export function InspectionDecisionPanel({
         />
       )}
 
-      {approving && approving.department?.code !== 'OBO' && (
+      {approving && !namesOnPass(approving) && (
         <ProtoModal
           title="Approve this inspection?"
           tone="green"

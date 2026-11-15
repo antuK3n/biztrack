@@ -140,7 +140,16 @@ class InspectionController extends Controller
             $this->workflow->refuseWhileOnHold($inspection->application?->business);
         }
 
-        $confirmed = $data['signatories'] ?? null;
+        /*
+         * An empty list confirms no names, the same as leaving the key out.
+         * The refusals below are for names sent where none are printed; an
+         * empty list sends none. Read as "names given", it refused every pass
+         * on the yearly Occupancy inspection, which prints no certificate,
+         * because the review screen sent `[]` there (BIZ-2026-00091 and 00092,
+         * November 2026). A Certificate of Occupancy pass sent `[]` is still
+         * refused below: it is missing every name it needs.
+         */
+        $confirmed = ($data['signatories'] ?? []) === [] ? null : $data['signatories'];
         $occupancy = $this->occupancyTypeFor($inspection);
         $passes = InspectionResult::from($data['result'])->progresses();
         if ($confirmed !== null) {

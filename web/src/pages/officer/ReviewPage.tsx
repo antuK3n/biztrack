@@ -4176,6 +4176,7 @@ function ReviewSheet({ onApproved }: { onApproved: () => void }) {
           <InspectionDecisionPanel
             inspections={app.inspections ?? []}
             filingStatus={app.status}
+            applicationType={app.application_type}
             onChanged={reload}
             book={bookFirstInspection}
           />

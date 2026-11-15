@@ -7,7 +7,9 @@ use App\Enums\ClearanceStatus;
 use App\Enums\PermitStatus;
 use App\Models\Application;
 use App\Models\ApplicationAssignment;
+use App\Models\ApplicationPermitType;
 use App\Models\AppNotification;
+use App\Models\AuditLog;
 use App\Models\Barangay;
 use App\Models\Business;
 use App\Models\Permit;
@@ -265,6 +267,35 @@ it('asks no certificate names on the yearly inspection, which prints no certific
     test()->getJson("/api/v1/inspections/{$visitId}/certificate-names")
         ->assertOk()->assertJsonPath('data.required', false);
     test()->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed'])->assertOk();
+});
+
+/*
+ * The review screen's Approve on an OBO visit sent `signatories: []` on the
+ * yearly inspection — the names dialog had no rows to fill — and the API
+ * answered 422 "Only the Certificate of Occupancy has its names confirmed at
+ * the visit", so the pass could not be recorded at all (BIZ-2026-00091 and
+ * 00092 on live). An empty list confirms no names; it is not a name sent
+ * where none is printed.
+ */
+it('passes the yearly inspection when the approve sends an empty list of names', function () {
+    [$app, $businessPermit, $occupancy] = oaiAnnualEntry();
+    authAs('obo@biztrack.local');
+    $visitId = test()->postJson("/api/v1/applications/{$app->id}/permits/OCCUPANCY/inspection", [
+        'scheduled_at' => now()->toDateTimeString(),
+    ])->assertCreated()->json('data.id');
+
+    test()->postJson("/api/v1/inspections/{$visitId}/conduct", ['result' => 'passed', 'signatories' => []])
+        ->assertOk();
+
+    $row = ApplicationPermitType::where('application_id', $app->id)
+        ->where('permit_type_id', PermitType::where('code', 'OCCUPANCY')->value('id'))->sole();
+    expect(oaiOccupancyStatus($app))->toBe(ClearanceStatus::Approved)
+        ->and($app->fresh()->isDecided())->toBeTrue()
+        ->and($occupancy->fresh()->valid_until->toDateString())->toBe('2028-01-05')
+        ->and($businessPermit->fresh()->status)->toBe(PermitStatus::Active)
+        // Nothing was confirmed, so nothing was kept or logged as confirmed.
+        ->and($row->confirmed_signatories)->toBeNull()
+        ->and(AuditLog::where('action', 'permit.signatories_confirmed')->count())->toBe(0);
 });
 
 it('lists the annual inspection under OBO For Inspection, labelled as one', function () {

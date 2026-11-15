@@ -365,6 +365,11 @@ it('prints the confirmed names on that permit only, and records who confirmed th
     // No names at all: refused too.
     test()->postJson("/api/v1/inspections/{$visit}/conduct", ['result' => 'passed'])
         ->assertStatus(422)->assertJsonValidationErrors('signatories');
+    // An empty list is no names, so refused the same way; the yearly
+    // inspection, which prints no certificate, is the only pass it clears.
+    test()->postJson("/api/v1/inspections/{$visit}/conduct", ['result' => 'passed', 'signatories' => []])
+        ->assertStatus(422)->assertJsonValidationErrors('signatories');
+    expect(\App\Models\Inspection::find($visit)->conducted_at)->toBeNull();
 
     test()->postJson("/api/v1/inspections/{$visit}/conduct", ['result' => 'passed', 'signatories' => $names])->assertOk();
 
