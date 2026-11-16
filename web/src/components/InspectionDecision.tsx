@@ -1471,6 +1471,11 @@ export function InspectionDecisionPanel({
     return item.department?.code === 'OBO' && applicationType !== 'annual_inspection'
   }
 
+  /** The OBO's visit on the yearly Occupancy inspection: a pass issues nothing. */
+  function isYearlyOccupancy(item: Inspection): boolean {
+    return item.department?.code === 'OBO' && applicationType === 'annual_inspection'
+  }
+
   /**
    * Is this visit still this office's CURRENT one, or has a later one replaced
    * it?
@@ -1911,8 +1916,18 @@ export function InspectionDecisionPanel({
             void conduct(item, 'passed')
           }}
         >
+          {/*
+            The yearly Occupancy inspection issues nothing: the Certificate of
+            Occupancy it checks stays valid and its next inspection moves a
+            year on (AnnualInspection::passed). "Your office's permit is issued" was
+            untrue there, so that visit says what does happen. Wording
+            approved by Ken, 16 November 2026. Every other visit keeps the
+            sentence below.
+          */}
           <p className="text-sm text-ink-secondary">
-            The inspection passes and your office’s permit is issued. This cannot be undone.
+            {isYearlyOccupancy(approving)
+              ? 'The inspection passes. The Certificate of Occupancy stays valid, and the next inspection is due in a year. This cannot be undone.'
+              : 'The inspection passes and your office’s permit is issued. This cannot be undone.'}
           </p>
         </ProtoModal>
       )}
