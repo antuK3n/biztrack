@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Mail\OwnerUpdate;
 use App\Models\User;
+use App\Support\SystemSwitches;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Log;
@@ -68,6 +69,12 @@ class SendOwnerUpdateEmail implements ShouldQueue
 
     public function handle(): void
     {
+        // Asked again here, not only when queued: a job already waiting or
+        // retrying when the switch goes off is dropped instead of sent.
+        if (! SystemSwitches::ownerEmails()) {
+            return;
+        }
+
         if (! $this->owner->email) {
             return;
         }

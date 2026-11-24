@@ -16,19 +16,22 @@ use Illuminate\Database\QueryException;
  *   office_hours   the "City offices are closed" notice (auto / open / closed)
  *   pretend_date   the date renewal deadlines and late penalties are judged
  *                  against (a date, or none)
+ *   owner_emails   the e-mail copy of each in-app notice to an owner (on / off)
  *
  * With no row, every switch answers exactly what the code answered before it
  * existed: sign-in codes follow EmailSwitch, the captcha follows
- * TURNSTILE_SECRET_KEY, the notice follows the clock, and there is no pretend
- * date. Clearing a switch (`default`) goes back to that.
+ * TURNSTILE_SECRET_KEY, the notice follows the clock, there is no pretend
+ * date, and owners are e-mailed their notices. Clearing a switch (`default`)
+ * goes back to that.
  *
  * ── One place each ─────────────────────────────────────────────────────────
  *
  * Each switch is read through one function here and the code that used to
  * decide reads that function instead: AuthController::login asks
  * signInCodes(), Turnstile::enabled() asks captchaOn(), OfficeHours::status()
- * asks officeHoursOverride(), and BusinessDate asks pretendDate(). Nothing
- * else reads the rows.
+ * asks officeHoursOverride(), and BusinessDate asks pretendDate(). The owner
+ * e-mail asks ownerEmails() twice, when it is queued and again when it is sent.
+ * Nothing else reads the rows.
  *
  * ── Turning on what cannot work is refused ─────────────────────────────────
  *
@@ -54,7 +57,9 @@ class SystemSwitches
 
     public const PRETEND_DATE = 'pretend_date';
 
-    public const NAMES = [self::SIGN_IN_CODES, self::CAPTCHA, self::OFFICE_HOURS, self::PRETEND_DATE];
+    public const OWNER_EMAILS = 'owner_emails';
+
+    public const NAMES = [self::SIGN_IN_CODES, self::CAPTCHA, self::OFFICE_HOURS, self::PRETEND_DATE, self::OWNER_EMAILS];
 
     /** How far the pretend date may sit from today, either way. */
     public const PRETEND_MAX_YEARS = 3;
@@ -103,6 +108,18 @@ class SystemSwitches
     }
 
     /**
+     * Whether an owner's in-app notices are also e-mailed to them
+     * (SendOwnerUpdateEmail). Off only when switched off, which the team lead
+     * asked for so testers filing during data collection stop being mailed at
+     * every step [2026-11-25]. The codes (EmailCodes) and the confirmation
+     * link (VerifyEmailAddress) do not ask this and keep going.
+     */
+    public static function ownerEmails(): bool
+    {
+        return self::stored(self::OWNER_EMAILS) !== 'off';
+    }
+
+    /**
      * Every switch as the Debug page shows it: what it is now, whether a row
      * is overriding the default, and whether it could be turned on.
      *
@@ -131,6 +148,10 @@ class SystemSwitches
                 'date' => self::pretendDate()?->toDateString(),
                 'real_today' => CarbonImmutable::today()->toDateString(),
             ],
+            self::OWNER_EMAILS => [
+                'on' => self::ownerEmails(),
+                'overridden' => self::stored(self::OWNER_EMAILS) !== null,
+            ],
         ];
     }
 
@@ -156,6 +177,8 @@ class SystemSwitches
             self::CAPTCHA => self::onOff($value, Turnstile::configured(), self::noCaptchaReason()),
             self::OFFICE_HOURS => self::officeHoursValue($value),
             self::PRETEND_DATE => self::pretendValue($value),
+            // Nothing it needs can be missing, so turning it on is never refused.
+            self::OWNER_EMAILS => self::onOff($value, true, ''),
         };
 
         Setting::write('switch.'.$name, $stored);

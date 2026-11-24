@@ -15,6 +15,7 @@ use App\Models\Permit;
 use App\Models\PermitType;
 use App\Models\User;
 use App\Support\PhMobile;
+use App\Support\SystemSwitches;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -24,7 +25,8 @@ use Throwable;
  * In-app notification fan-out (master plan §4 — polling, no websockets).
  *
  * Every notice written for a BUSINESS OWNER is also e-mailed to them, queued,
- * from push() — see queueOwnerEmail() and App\Jobs\SendOwnerUpdateEmail. That
+ * from push() — see queueOwnerEmail() and App\Jobs\SendOwnerUpdateEmail —
+ * unless the `owner_emails` system switch is off. That
  * replaced a synchronous `Mail::raw('BizTrack notification')` in fanOut(),
  * which sent a one-line mail to every recipient, staff included, inside the
  * request: harmless while the mailer was `log`, but with a real SMTP relay it
@@ -120,6 +122,13 @@ class NotificationService
         Application|Permit|Business|null $about,
         bool $disapproval,
     ): void {
+        // Switched off (SystemSwitches::ownerEmails), the owner keeps the
+        // in-app notice push() has just written and is not mailed a copy.
+        // Codes (EmailCodes) and the confirmation link do not come this way.
+        if (! SystemSwitches::ownerEmails()) {
+            return;
+        }
+
         [$reference, $businessName] = $this->describe($about);
 
         DB::afterCommit(function () use ($owner, $title, $body, $link, $reference, $businessName, $disapproval) {
