@@ -15,7 +15,7 @@ import { MapPicker } from '../../components/MapPicker'
 import { ErrorState, Skeleton } from '../../components/ui/primitives'
 import { TaxOrderBreakdown } from '../../components/TaxOrderBreakdown'
 import { FieldLabel, FilterPills, PageTitle, ProtoModal, inputCls } from '../../components/ui/Proto'
-import { toApiError } from '../../lib/api'
+import { portalPath, toApiError } from '../../lib/api'
 import {
   formatBytes,
   formatDate,
@@ -2196,6 +2196,7 @@ function splitLine1(line1: string | null | undefined): {
  */
 export function ReviewPage() {
   const navigate = useNavigate()
+  const portal = useAuth((s) => s.portal)
   const [showVerification, setShowVerification] = useState(false)
 
   return (
@@ -2207,7 +2208,17 @@ export function ReviewPage() {
           title="VERIFICATION"
           cancelLabel="Home Page"
           confirmLabel="Tracking Page"
-          onCancel={() => navigate('/dashboard')}
+          /*
+           * Home Page is the officer's own home, the one the rail's Home links
+           * to (`portalPath(portal, '/dashboard')`, lib/nav.ts) — on this site
+           * `/staff/dashboard`. It said `/dashboard`, the BUSINESS OWNER's home,
+           * where a staff session does not count, so the officer was dropped on
+           * the owner's sign-in page. Focus opens on this button and Escape
+           * calls it too, so a key press went the same way [Rupert: "approving
+           * an application sends you to the home page"].
+           * e2e/approve-home-page.spec.ts.
+           */
+          onCancel={() => navigate(portalPath(portal, '/dashboard'))}
           onConfirm={() => navigate('/staff/queue')}
         >
           {/*
